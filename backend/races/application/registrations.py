@@ -17,7 +17,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from django.db.models import Case, IntegerField, Q, QuerySet, Value, When
+from django.db.models import Case, Count, IntegerField, Q, QuerySet, Value, When
 
 from races.application.channel_options import ChannelConfigError, options_for
 from races.application.register import (
@@ -36,7 +36,7 @@ from races.domain.normalize import (
     NormalizeOptions,
     normalize,
 )
-from races.domain.rules import validate
+from races.domain.rules import category_birth_ranges, validate
 from races.models import Channel, Race, Registration
 
 Status = Registration.Status
@@ -263,6 +263,62 @@ def search(race: Race, q: str = "", status: str | None = None) -> QuerySet[Regis
         .prefetch_related("also_channels", "notifications")
         .order_by(without_bib_last, "bib", "waitlist_position", "id")
     )
+
+
+def race_stats(race: Race) -> dict:
+    """Cifras para el resumen de la carrera, contadas en la base de datos (3 consultas).
+
+    Las categorías no se guardan: se cuentan con rangos de fecha de nacimiento calculados con la
+    fecha de la carrera (`category_birth_ranges`), que dan lo mismo que `category_for`.
+    """
+    registrations = Registration.objects.filter(race=race)
+    active = ~Q(status=Status.WITHDRAWN)
+    ranges = category_birth_ranges(race.date)
+    aggregates = {
+        "confirmed": Count("id", filter=Q(status=Status.CONFIRMED)),
+        "waitlisted": Count("id", filter=Q(status=Status.WAITLISTED)),
+        "withdrawn": Count("id", filter=Q(status=Status.WITHDRAWN)),
+        "possible_duplicates": Count("id", filter=active & Q(possible_duplicate_of__isnull=False)),
+        "missing": Count("id", filter=active & Q(missing_since__isnull=False)),
+    }
+    for index, (_name, after, until) in enumerate(ranges):
+        in_range = Q(birth_date__lte=until)
+        if after is not None:
+            in_range &= Q(birth_date__gt=after)
+        aggregates[f"category_{index}"] = Count("id", filter=active & in_range)
+    totals = registrations.aggregate(**aggregates)
+    by_channel = (
+        registrations.filter(active)
+        .values("channel__name")
+        .annotate(count=Count("id"))
+        .order_by("-count", "channel__name")
+    )
+    emails = dict(
+        registrations.filter(notifications__isnull=False)
+        .values_list("notifications__status")
+        .annotate(count=Count("id"))
+    )
+    capacity = race.capacity
+    return {
+        "capacity": capacity,
+        "confirmed": totals["confirmed"],
+        "waitlisted": totals["waitlisted"],
+        "withdrawn": totals["withdrawn"],
+        "free": None if capacity is None else max(0, capacity - totals["confirmed"]),
+        "over_capacity": 0 if capacity is None else max(0, totals["confirmed"] - capacity),
+        "possible_duplicates": totals["possible_duplicates"],
+        "missing": totals["missing"],
+        # Inscripciones activas (confirmadas y en espera) por categoría y por canal.
+        "by_category": [
+            {"name": name, "count": totals[f"category_{index}"]}
+            for index, (name, _after, _until) in enumerate(ranges)
+        ],
+        "by_channel": [{"name": row["channel__name"], "count": row["count"]} for row in by_channel],
+        "emails": {
+            "sent": emails.get("enviada", 0),
+            "failed": emails.get("fallida", 0),
+        },
+    }
 
 
 # --- internos -------------------------------------------------------------------------------

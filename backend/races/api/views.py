@@ -159,6 +159,11 @@ class RaceViewSet(
             status=status.HTTP_201_CREATED,
         )
 
+    @action(detail=True, methods=["get"])
+    def stats(self, request, pk=None):
+        """Cifras del resumen: plazas, estados, categorías, canales y emails."""
+        return Response(registrations.race_stats(self.get_object()))
+
     @action(detail=True, methods=["post"], url_path="registrations/check")
     def check_registration(self, request, pk=None):
         """Aviso antes de guardar: ya inscrita, posible duplicado, o irá a lista de espera.

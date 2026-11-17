@@ -96,3 +96,31 @@ def _is_valid_email(email: str) -> bool:
     except ValidationError:
         return False
     return True
+
+
+def latest_birth_date_for_age(age: int, on: date) -> date:
+    """La fecha de nacimiento más reciente con la que se tienen `age` años el día `on`.
+
+    Tener al menos `age` años ese día ⇔ `birth_date <= latest_birth_date_for_age(age, on)`. Si `on`
+    es 29 de febrero y ese año no es bisiesto, es el 28: quien nació el 1 de marzo aún no los tiene.
+    """
+    year = on.year - age
+    try:
+        return on.replace(year=year)
+    except ValueError:
+        return date(year, 2, 28)
+
+
+def category_birth_ranges(race_date: date) -> list[tuple[str, date | None, date]]:
+    """Cada categoría como rango de fechas de nacimiento: `(nombre, después_de, hasta_incluida)`.
+
+    Para contar o filtrar por categoría en la base de datos sin guardarla: la categoría se sigue
+    calculando con la fecha de la carrera, y estos rangos dan lo mismo que `category_for`.
+    """
+    ranges = []
+    older_bound = None  # la categoría siguiente (más edad) empieza aquí
+    for min_age, name in CATEGORIES:
+        latest = latest_birth_date_for_age(min_age, race_date)
+        ranges.append((name, older_bound, latest))
+        older_bound = latest
+    return list(reversed(ranges))
