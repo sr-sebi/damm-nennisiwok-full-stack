@@ -53,10 +53,15 @@ function EmailMark({ status }) {
   return status.last_error ? <Tooltip title={status.last_error}>{chip}</Tooltip> : chip;
 }
 
-function Marks({ registration, onSearch }) {
+function Marks({ registration, onSearch, onNotDuplicate }) {
   const duplicate = registration.possible_duplicate_of;
   return (
     <Stack spacing={0.5} sx={{ alignItems: 'flex-start' }}>
+      {duplicate && onNotDuplicate && (
+        <Button size="small" onClick={() => onNotDuplicate(registration)} sx={{ p: 0, minWidth: 0 }}>
+          No es duplicado
+        </Button>
+      )}
       {duplicate && (
         <Tooltip title="Mismo nombre y fecha de nacimiento con otro email: revisa si es la misma persona.">
           <Chip
@@ -156,7 +161,13 @@ function EmptyRow({ search, status, total }) {
 
 // Lista paginada de inscripciones con búsqueda (por nombre, email o dorsal) y filtro de estado.
 // `refreshKey` cambia cuando algo de fuera (una importación, un alta) puede haberla cambiado.
-export default function RegistrationsTable({ raceId, refreshKey, onEdit, onWithdraw }) {
+export default function RegistrationsTable({
+  raceId,
+  refreshKey,
+  onEdit,
+  onWithdraw,
+  onNotDuplicate,
+}) {
   const [input, setInput] = useState('');
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
@@ -312,7 +323,11 @@ export default function RegistrationsTable({ raceId, refreshKey, onEdit, onWithd
                   />
                 </TableCell>
                 <TableCell>
-                  <Marks registration={registration} onSearch={showSearch} />
+                  <Marks
+                    registration={registration}
+                    onSearch={showSearch}
+                    onNotDuplicate={onNotDuplicate}
+                  />
                 </TableCell>
                 <TableCell align="right">
                   <Actions registration={registration} onEdit={onEdit} onWithdraw={onWithdraw} />

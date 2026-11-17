@@ -24,7 +24,13 @@ import { formatDateTime } from '../utils/format';
 
 const PLACEHOLDERS = ['{nombre}', '{dorsal}', '{carrera}', '{fecha}'];
 
-const RESULT_COLOR = { ok: 'success', error: 'error', locked: 'warning', en_marcha: 'info' };
+const RESULT_COLOR = {
+  ok: 'success',
+  error: 'error',
+  locked: 'warning',
+  caido: 'warning',
+  en_marcha: 'info',
+};
 
 function networkMessage(err) {
   return err.status ? err.message : 'No se ha podido conectar con el servidor.';

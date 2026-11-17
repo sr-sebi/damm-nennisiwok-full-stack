@@ -34,11 +34,13 @@ export default function IssueList({ issues }) {
                       <Chip label="Ya vista" size="small" variant="outlined" />
                     )}
                   </Box>
-                  {issue.kind === 'ya_inscrita' &&
+                  {['ya_inscrita', 'repetida'].includes(issue.kind) &&
                     (differences.length ? (
                       <Box>
                         <Typography variant="caption" color="text.secondary">
-                          Lo que tenemos → lo que trae este listado:
+                          {issue.kind === 'repetida'
+                            ? 'La primera fila → esta:'
+                            : 'Lo que tenemos → lo que trae este listado:'}
                         </Typography>
                         <Stack direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: 'wrap' }}>
                           {differences.map((difference) => (

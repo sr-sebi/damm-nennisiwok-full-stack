@@ -13,6 +13,7 @@ import {
 import { useCallback, useEffect, useState } from 'react';
 import { Link as RouterLink, useParams } from 'react-router-dom';
 import { getRace, listChannels } from '../api/races';
+import { clearPossibleDuplicate } from '../api/registrations';
 import ConfirmationsPanel from '../components/ConfirmationsPanel';
 import EditRegistrationDialog from '../components/EditRegistrationDialog';
 import ImportPanel from '../components/ImportPanel';
@@ -121,6 +122,16 @@ export default function RaceDetailPage() {
     setEditingId(registrationId);
   };
 
+  const handleNotDuplicate = async (registration) => {
+    try {
+      const result = await clearPossibleDuplicate(registration.id);
+      setNotice({ severity: 'success', text: result.message });
+      refresh();
+    } catch (err) {
+      setNotice({ severity: 'error', text: `No se pudo quitar la marca: ${err.message}` });
+    }
+  };
+
   const handleWithdrawn = (result) => {
     setWithdrawing(null);
     setNotice({ severity: result.already_withdrawn ? 'info' : 'success', text: result.message });
@@ -183,6 +194,7 @@ export default function RaceDetailPage() {
           refreshKey={version}
           onEdit={(registration) => setEditingId(registration.id)}
           onWithdraw={setWithdrawing}
+          onNotDuplicate={handleNotDuplicate}
         />
       </Paper>
 

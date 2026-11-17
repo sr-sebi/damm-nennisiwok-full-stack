@@ -28,6 +28,8 @@ export default function ConfirmationsPanel({ raceId, onChange }) {
   const [busy, setBusy] = useState(false);
   const [following, setFollowing] = useState(false);
   const onChangeRef = useRef(onChange);
+  // Último envío con el botón que ya conocíamos: el seguimiento para cuando llega uno nuevo.
+  const lastSendSeen = useRef(undefined);
 
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -64,7 +66,18 @@ export default function ConfirmationsPanel({ raceId, onChange }) {
     if (!following) return undefined;
     const timer = setInterval(async () => {
       const next = await load();
-      if (next && next.pending === 0 && next.sending === 0) {
+      if (!next) return;
+      const finished = next.last_send && next.last_send.id !== lastSendSeen.current;
+      if (finished) {
+        lastSendSeen.current = next.last_send.id;
+        const failedRun = next.last_send.result === 'error';
+        const later = !failedRun && next.pending > 0 ? ' Las que faltan se reintentarán solas.' : '';
+        setNotice({
+          severity: failedRun ? 'error' : 'success',
+          text: `${failedRun ? 'El envío se ha parado: ' : 'Envío terminado: '}${next.last_send.summary}${later}`,
+        });
+      }
+      if (finished || (next.pending === 0 && next.sending === 0)) {
         setFollowing(false);
         onChangeRef.current?.();
       }
@@ -73,6 +86,7 @@ export default function ConfirmationsPanel({ raceId, onChange }) {
   }, [following, load]);
 
   const handleSend = async () => {
+    lastSendSeen.current = data?.last_send?.id ?? null;
     setBusy(true);
     setNotice(null);
     try {
@@ -88,6 +102,7 @@ export default function ConfirmationsPanel({ raceId, onChange }) {
   };
 
   const handleRetry = async (notificationId) => {
+    lastSendSeen.current = data?.last_send?.id ?? null;
     setNotice(null);
     try {
       const result = await retryNotification(notificationId);
@@ -141,6 +156,12 @@ export default function ConfirmationsPanel({ raceId, onChange }) {
           <Alert severity="info">La carrera ya se ha celebrado: no se envían confirmaciones.</Alert>
         )}
         {notice && <Alert severity={notice.severity}>{notice.text}</Alert>}
+        {!notice && !following && data.last_send?.result === 'error' && (
+          <Alert severity="error">
+            El último envío se paró ({formatDateTime(data.last_send.finished_at)}):{' '}
+            {data.last_send.summary}
+          </Alert>
+        )}
         {error && <Alert severity="warning">No se pudo actualizar el estado: {error}</Alert>}
 
         <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1 }}>

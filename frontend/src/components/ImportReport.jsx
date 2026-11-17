@@ -47,6 +47,13 @@ const SECTIONS = [
     color: 'warning',
   },
   {
+    kind: 'repetida',
+    heading: 'Mismo email que otra fila, con otros datos',
+    intro:
+      'Solo se ha inscrito la primera fila con ese email. Si son personas distintas (por ejemplo, una madre y su hijo), la segunda necesita su propio email.',
+    color: 'warning',
+  },
+  {
     kind: 'rechazada',
     heading: 'Filas rechazadas',
     intro: 'No se han inscrito. Están agrupadas por motivo, con su línea en el fichero.',

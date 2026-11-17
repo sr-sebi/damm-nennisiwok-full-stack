@@ -18,3 +18,6 @@ export const updateRegistration = (registrationId, changes) =>
 
 export const withdrawRegistration = (registrationId) =>
   apiFetch(`/registrations/${registrationId}/withdraw/`, { method: 'POST' });
+
+export const clearPossibleDuplicate = (registrationId) =>
+  apiFetch(`/registrations/${registrationId}/not-duplicate/`, { method: 'POST' });
