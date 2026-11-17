@@ -20,7 +20,9 @@ export default function IssueList({ issues }) {
             <TableRow key={issue.id}>
               {hasLines && <TableCell>{issue.line ?? '—'}</TableCell>}
               <TableCell sx={{ wordBreak: 'break-word' }}>
-                {describeRaw(issue.raw) || (issue.bib ? `Dorsal ${issue.bib}` : '—')}
+                {describeRaw(issue.raw) ||
+                  [issue.person, issue.bib ? `dorsal ${issue.bib}` : ''].filter(Boolean).join(', ') ||
+                  '—'}
               </TableCell>
               <TableCell>
                 <Stack spacing={0.5}>

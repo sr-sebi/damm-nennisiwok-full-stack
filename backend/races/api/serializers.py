@@ -388,7 +388,9 @@ class ImportReportSerializer(ImportBatchSerializer):
         for row in rows:
             filters = {k: row[k] for k in ("kind", "code", "field", "group_value")}
             examples = list(
-                batch.issues.filter(**filters).order_by("line", "id")[:EXAMPLES_PER_GROUP]
+                batch.issues.filter(**filters)
+                .select_related("registration")
+                .order_by("line", "id")[:EXAMPLES_PER_GROUP]
             )
             groups.append(
                 {
@@ -404,6 +406,8 @@ class ImportReportSerializer(ImportBatchSerializer):
 
 class IssueSerializer(serializers.ModelSerializer):
     bib = serializers.IntegerField(source="registration.bib", default=None, read_only=True)
+    # Nombre de la inscripción enlazada: un ausente no tiene fila en bruto con la que nombrarlo.
+    person = serializers.SerializerMethodField()
 
     class Meta:
         model = ImportIssue
@@ -420,8 +424,13 @@ class IssueSerializer(serializers.ModelSerializer):
             "is_new",
             "registration",
             "bib",
+            "person",
         ]
         read_only_fields = fields
+
+    def get_person(self, issue):
+        reg = issue.registration
+        return f"{reg.first_name} {reg.last_name}" if reg else ""
 
 
 def _group_title(row, examples) -> str:
