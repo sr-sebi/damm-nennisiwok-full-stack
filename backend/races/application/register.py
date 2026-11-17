@@ -84,17 +84,7 @@ class RaceRegistrar:
         return Registration.objects.filter(race=self.race, email_norm=email_norm).first()
 
     def find_possible_duplicate(self, values: CanonicalRegistration) -> Registration | None:
-        """La más antigua con el mismo nombre normalizado y fecha de nacimiento, y otro email."""
-        return (
-            Registration.objects.filter(
-                race=self.race,
-                birth_date=values.birth_date,
-                search_text=name_key(values.first_name, values.last_name),
-            )
-            .exclude(email_norm=values.email_norm)
-            .order_by("id")
-            .first()
-        )
+        return find_possible_duplicate(self.race.pk, values)
 
     def has_also_channel(self, registration: Registration, channel: Channel) -> bool:
         return registration.also_channels.filter(pk=channel.pk).exists()
@@ -188,7 +178,7 @@ class RaceRegistrar:
             race=self.race,
             channel=channel,
             possible_duplicate_of=duplicate_of,
-            **_fields(values),
+            **registration_fields(values),
         )
         if self._has_room():
             registration.status = Status.CONFIRMED
@@ -209,7 +199,7 @@ class RaceRegistrar:
         found = differences(as_canonical(registration), values)
         changed = []
         if found:
-            for name, value in _fields(values).items():
+            for name, value in registration_fields(values).items():
                 if getattr(registration, name) != value:
                     setattr(registration, name, value)
                     changed.append(name)
@@ -255,6 +245,18 @@ def change_capacity(race_id: int, capacity: int | None) -> list[Registration]:
         return registrar.change_capacity(capacity)
 
 
+def find_possible_duplicate(race_id: int, values: CanonicalRegistration) -> Registration | None:
+    """La más antigua con el mismo nombre normalizado y fecha de nacimiento, y otro email."""
+    queryset = Registration.objects.filter(
+        race_id=race_id,
+        birth_date=values.birth_date,
+        search_text=name_key(values.first_name, values.last_name),
+    )
+    if values.email_norm:
+        queryset = queryset.exclude(email_norm=values.email_norm)
+    return queryset.order_by("id").first()
+
+
 def as_canonical(registration: Registration) -> CanonicalRegistration:
     return CanonicalRegistration(
         first_name=registration.first_name,
@@ -267,7 +269,8 @@ def as_canonical(registration: Registration) -> CanonicalRegistration:
     )
 
 
-def _fields(values: CanonicalRegistration) -> dict:
+def registration_fields(values: CanonicalRegistration) -> dict:
+    """Valores canónicos → campos de `Registration`, con su `search_text`."""
     return {
         "first_name": values.first_name,
         "last_name": values.last_name,
