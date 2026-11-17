@@ -5,9 +5,20 @@ from django.db.models import Count, Q
 from rest_framework import serializers
 
 from races.application.send_confirmations import is_eligible
+from races.domain.email_template import template_errors
 from races.domain.issues import Issue, IssueCode, group_message
 from races.domain.rules import category_for
-from races.models import Channel, ImportBatch, ImportIssue, Notification, Race, Registration
+from races.infrastructure.email import active_provider_name
+from races.models import (
+    Channel,
+    ImportBatch,
+    ImportIssue,
+    JobRun,
+    Notification,
+    Race,
+    Registration,
+)
+from races.models import Settings as AppSettings
 
 ALLOWED_EXTENSIONS = {".xlsx": Channel.Format.XLSX, ".csv": Channel.Format.CSV}
 EXAMPLES_PER_GROUP = 5
@@ -424,3 +435,97 @@ def _group_title(row, examples) -> str:
     return group_message(
         Issue(code=code, field=row["field"], raw=row["group_value"], message=sample)
     )
+
+
+def _limits(low, high, too_high):
+    # DRF no usa el mensaje de los validadores del modelo para min/max: se le da aquí.
+    return {
+        "min_value": low,
+        "max_value": high,
+        "error_messages": {
+            "min_value": f"Tiene que ser al menos {low}.",
+            "max_value": too_high,
+            "invalid": "Tiene que ser un número entero.",
+        },
+    }
+
+
+class SettingsSerializer(serializers.ModelSerializer):
+    """La configuración editable. El proveedor de email se enseña, pero no se cambia aquí: se
+    elige en el entorno (`EMAIL_PROVIDER`), junto con sus credenciales."""
+
+    email_provider = serializers.SerializerMethodField()
+    last_scheduled_send = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AppSettings
+        fields = [
+            "auto_send_enabled",
+            "auto_send_time",
+            "email_subject",
+            "email_body",
+            "send_rate_per_second",
+            "max_attempts",
+            "import_stale_minutes",
+            "email_provider",
+            "last_scheduled_send",
+            "updated_at",
+        ]
+        read_only_fields = ["updated_at"]
+        extra_kwargs = {
+            "auto_send_time": {
+                "format": "%H:%M",
+                "input_formats": ["%H:%M", "%H:%M:%S"],
+                "error_messages": {"invalid": "Hora no válida: usa HH:MM (por ejemplo, 08:00)."},
+            },
+            "send_rate_per_second": _limits(
+                1,
+                19,
+                "El ritmo máximo es 19 emails por segundo: el proveedor corta a partir de 20.",
+            ),
+            "max_attempts": _limits(1, 20, "Como mucho 20 intentos por email."),
+            "import_stale_minutes": _limits(1, 1440, "Como mucho 1440 minutos (un día)."),
+        }
+
+    def get_email_provider(self, obj):
+        return active_provider_name()
+
+    def get_last_scheduled_send(self, obj):
+        run = (
+            JobRun.objects.filter(job=JobRun.Job.SCHEDULED_SEND)
+            .exclude(result=JobRun.Result.LOCKED)
+            .first()
+        )
+        return JobRunSerializer(run).data if run else None
+
+    def validate_email_subject(self, value):
+        return _template(value)
+
+    def validate_email_body(self, value):
+        return _template(value)
+
+
+def _template(value):
+    errors = template_errors(value)
+    if errors:
+        raise serializers.ValidationError(errors)
+    return value
+
+
+class JobRunSerializer(serializers.ModelSerializer):
+    job_display = serializers.CharField(source="get_job_display", read_only=True)
+    result_display = serializers.CharField(source="get_result_display", read_only=True)
+
+    class Meta:
+        model = JobRun
+        fields = [
+            "id",
+            "job",
+            "job_display",
+            "started_at",
+            "finished_at",
+            "result",
+            "result_display",
+            "summary",
+        ]
+        read_only_fields = fields

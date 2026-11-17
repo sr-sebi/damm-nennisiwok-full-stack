@@ -5,6 +5,7 @@ from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from races.api.serializers import (
     ChannelSerializer,
@@ -13,6 +14,7 @@ from races.api.serializers import (
     ImportReportSerializer,
     ImportUploadSerializer,
     IssueSerializer,
+    JobRunSerializer,
     NotificationSerializer,
     RaceCapacitySerializer,
     RaceSerializer,
@@ -20,12 +22,14 @@ from races.api.serializers import (
     RegistrationDataSerializer,
     RegistrationSerializer,
     RegistrationSummarySerializer,
+    SettingsSerializer,
 )
 from races.application import register, registrations, send_confirmations
 from races.application.import_registrations import submit_import
 from races.application.registrations import AlreadyRegistered, RegistrationRejected
 from races.application.send_confirmations import CannotRetry
-from races.models import Channel, ImportBatch, Notification, Race, Registration
+from races.models import Channel, ImportBatch, JobRun, Notification, Race, Registration
+from races.models import Settings as AppSettings
 
 RECENT_IMPORTS = 20
 
@@ -311,3 +315,29 @@ class ChannelViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     queryset = Channel.objects.all()
     serializer_class = ChannelSerializer
     pagination_class = None
+
+
+class SettingsView(APIView):
+    """GET y PUT de la configuración (fila única). Vale en la siguiente tarea, sin reiniciar."""
+
+    def get(self, request):
+        return Response(SettingsSerializer(AppSettings.load()).data)
+
+    def put(self, request):
+        data = SettingsSerializer(AppSettings.load(), data=request.data)
+        data.is_valid(raise_exception=True)
+        data.save()
+        return Response(data.data)
+
+
+class JobRunViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
+    """Últimas ejecuciones de los trabajos programados (`?job=`)."""
+
+    serializer_class = JobRunSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        runs = JobRun.objects.all()
+        if job := self.request.query_params.get("job"):
+            runs = runs.filter(job=job)
+        return runs.order_by("-started_at", "-id")[:RECENT_IMPORTS]

@@ -22,12 +22,29 @@ def send_confirmations(race_id: int | None = None) -> None:
     Lo que quede para más tarde (un reintento lejano) se vuelve a encolar para su hora. Con un
     error de configuración, no: hay que arreglarla, y el siguiente envío lo retoma.
     """
-    summary = send_pending(race_id, load_send_config())
+    follow_up(race_id, send_pending(race_id, load_send_config()))
+
+
+def follow_up(race_id: int | None, summary) -> None:
+    """Si quedan reintentos para más tarde, vuelve a encolar el envío para su hora.
+
+    Lo usan la tarea del botón y el envío programado. Con un error de configuración, no: hay que
+    arreglarla, y el siguiente envío lo retoma. Sin worker (tareas en la petición), tampoco: sería
+    un bucle dentro de la petición.
+    """
     if (
         summary.retry_later
         and summary.next_attempt_at is not None
         and not summary.config_error
-        and not settings.CELERY_TASK_ALWAYS_EAGER  # en la propia petición sería un bucle
+        and not settings.CELERY_TASK_ALWAYS_EAGER
     ):
         wait = (summary.next_attempt_at - timezone.now()).total_seconds()
         send_confirmations.apply_async(args=[race_id], countdown=max(1, math.ceil(wait)))
+
+
+@shared_task(ignore_result=True)
+def heartbeat() -> None:
+    """Cada minuto (Celery beat): importaciones caídas y envío programado, si toca."""
+    from races.application.scheduled_jobs import run_due_jobs
+
+    run_due_jobs()

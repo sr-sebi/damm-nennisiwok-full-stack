@@ -101,6 +101,17 @@ CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "amqp://guest:guest@loca
 # Sin Docker no hace falta RabbitMQ: las tareas se ejecutan dentro del propio proceso web.
 CELERY_TASK_ALWAYS_EAGER = env_bool("CELERY_TASK_ALWAYS_EAGER", True)
 CELERY_TASK_EAGER_PROPAGATES = True
+CELERY_TIMEZONE = TIME_ZONE
+# Beat solo late: cada minuto lanza el latido, que lee la configuración de la base de datos y decide
+# si toca algo. Cambiar la hora del envío en la app vale en el siguiente latido, sin reiniciar beat.
+# Caduca a los 55 s: si el worker estuvo parado, no se acumulan latidos atrasados.
+CELERY_BEAT_SCHEDULE = {
+    "latido": {
+        "task": "races.tasks.heartbeat",
+        "schedule": 60.0,
+        "options": {"expires": 55},
+    },
+}
 
 # Proveedor de email activo (races.infrastructure.email.PROVIDERS). Sus credenciales y su URL van en
 # el entorno, no en la base de datos: dependen del entorno y no deben verse en una pantalla.
@@ -122,6 +133,6 @@ LOGGING = {
     },
 }
 
-# Importaciones: tope del fichero subido y minutos sin avanzar para darla por caída.
+# Importaciones: tope del fichero subido. Los minutos para darla por caída están en la
+# configuración de la base de datos (`races.models.Settings`), editable en la app.
 IMPORT_MAX_UPLOAD_MB = 20
-IMPORT_STALE_MINUTES = int(os.environ.get("IMPORT_STALE_MINUTES", "10"))

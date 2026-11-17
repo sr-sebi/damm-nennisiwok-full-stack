@@ -35,7 +35,6 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
-from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
@@ -46,7 +45,7 @@ from races.domain.issues import Issue, raw_text
 from races.domain.normalize import CanonicalRegistration, is_blank, normalize
 from races.domain.rules import validate
 from races.infrastructure.sources import SourceError, read_registrations
-from races.models import Channel, ImportBatch, ImportIssue, Race, Registration
+from races.models import Channel, ImportBatch, ImportIssue, Race, Registration, Settings
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +129,8 @@ def claim_next(race_id: int) -> int | None:
 
 
 def stale_after() -> timedelta:
-    return timedelta(minutes=settings.IMPORT_STALE_MINUTES)
+    """Se lee de la configuración en cada uso: un cambio en la pantalla vale al momento."""
+    return timedelta(minutes=Settings.load().import_stale_minutes)
 
 
 def _give_up(batch: ImportBatch, now) -> None:

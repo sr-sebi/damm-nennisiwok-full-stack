@@ -1,5 +1,9 @@
+from __future__ import annotations
+
+import datetime
+
 from django.core.exceptions import ValidationError
-from django.core.validators import MinValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q
 
@@ -332,3 +336,104 @@ class Notification(models.Model):
     @staticmethod
     def confirmation_key(registration_id: int, bib: int) -> str:
         return f"confirmacion-{registration_id}-{bib}"
+
+
+class Settings(models.Model):
+    """Configuración operativa, en una sola fila (pk=1), editable en la pantalla «Configuración».
+
+    Se lee al empezar cada tarea, sin caché: un cambio vale en el siguiente latido. Los secretos y
+    la URL del proveedor de email no están aquí (dependen del entorno y no deben verse en una
+    pantalla), ni las reglas de negocio (categorías, edad mínima, tallas: van en código).
+    """
+
+    auto_send_enabled = models.BooleanField(default=False, verbose_name="envío programado")
+    # Hora local (TIME_ZONE) a partir de la cual se hace el envío del día.
+    auto_send_time = models.TimeField(default=datetime.time(8, 0), verbose_name="hora de envío")
+    email_subject = models.CharField(max_length=200, verbose_name="asunto")
+    email_body = models.TextField(verbose_name="cuerpo")
+    # El proveedor admite 20 por segundo: el ritmo propio se queda por debajo.
+    send_rate_per_second = models.PositiveSmallIntegerField(
+        default=15,
+        validators=[
+            MinValueValidator(1, "El ritmo tiene que ser de al menos 1 email por segundo."),
+            MaxValueValidator(
+                19, "El ritmo máximo es 19 emails por segundo: el proveedor corta a partir de 20."
+            ),
+        ],
+        verbose_name="emails por segundo",
+    )
+    max_attempts = models.PositiveSmallIntegerField(
+        default=6,
+        validators=[
+            MinValueValidator(1, "Hace falta al menos 1 intento."),
+            MaxValueValidator(20, "Como mucho 20 intentos por email."),
+        ],
+        verbose_name="intentos máximos",
+    )
+    import_stale_minutes = models.PositiveSmallIntegerField(
+        default=10,
+        validators=[
+            MinValueValidator(1, "Al menos 1 minuto."),
+            MaxValueValidator(1440, "Como mucho 1440 minutos (un día)."),
+        ],
+        verbose_name="minutos sin avanzar para dar una importación por caída",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "configuración"
+        verbose_name_plural = "configuración"
+        constraints = [models.CheckConstraint(condition=Q(id=1), name="settings_single_row")]
+
+    def __str__(self):
+        return "Configuración"
+
+    @classmethod
+    def load(cls) -> Settings:
+        """La fila única; la crea con los valores por defecto la primera vez."""
+        row = cls.objects.filter(pk=1).first()
+        if row is not None:
+            return row
+        from races.domain.email_template import DEFAULT_BODY, DEFAULT_SUBJECT
+
+        row, _ = cls.objects.get_or_create(
+            pk=1, defaults={"email_subject": DEFAULT_SUBJECT, "email_body": DEFAULT_BODY}
+        )
+        return row
+
+
+class JobRun(models.Model):
+    """Una ejecución de un trabajo programado, con su resultado y un resumen en cifras.
+
+    La fila `en_marcha` es también el cerrojo: solo puede haber una por trabajo (lo garantiza la
+    base de datos, como «procesando» en las importaciones), así que dos latidos a la vez no hacen
+    dos envíos.
+    """
+
+    class Job(models.TextChoices):
+        SCHEDULED_SEND = "envio_programado", "Envío programado de confirmaciones"
+
+    class Result(models.TextChoices):
+        RUNNING = "en_marcha", "En marcha"
+        OK = "ok", "Hecho"
+        IDLE = "idle", "No tocaba"
+        LOCKED = "locked", "Otro en marcha"
+        ERROR = "error", "Error"
+
+    job = models.CharField(max_length=30, choices=Job.choices)
+    started_at = models.DateTimeField()
+    finished_at = models.DateTimeField(null=True, blank=True)
+    result = models.CharField(max_length=20, choices=Result.choices)
+    summary = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-started_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["job"], condition=Q(result="en_marcha"), name="job_run_one_running"
+            ),
+        ]
+        indexes = [models.Index(fields=["job", "started_at"], name="job_run_job_started")]
+
+    def __str__(self):
+        return f"{self.get_job_display()} {self.started_at:%d/%m/%Y %H:%M}: {self.result}"

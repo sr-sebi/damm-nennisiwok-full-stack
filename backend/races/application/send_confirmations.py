@@ -67,7 +67,7 @@ from races.infrastructure.email import (
     active_provider_name,
     get_provider,
 )
-from races.models import Notification, Race, Registration
+from races.models import Notification, Race, Registration, Settings
 
 logger = logging.getLogger(__name__)
 
@@ -97,8 +97,14 @@ class SendConfig:
 
 
 def load_send_config() -> SendConfig:
-    """La configuración de envío. Por ahora, los valores por defecto."""
-    return SendConfig()
+    """La configuración de envío de la pantalla «Configuración», leída en cada envío (sin caché)."""
+    config = Settings.load()
+    return SendConfig(
+        subject=config.email_subject,
+        body=config.email_body,
+        rate_per_second=float(config.send_rate_per_second),
+        max_attempts=config.max_attempts,
+    )
 
 
 @dataclass
