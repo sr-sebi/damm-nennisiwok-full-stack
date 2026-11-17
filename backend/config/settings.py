@@ -115,7 +115,7 @@ LOGGING = {
         "console": {"class": "logging.StreamHandler", "formatter": "simple"},
     },
     "loggers": {
-        "races": {"handlers": ["console"], "level": "INFO"},
+        "races": {"handlers": ["console"], "level": "INFO", "propagate": False},
     },
 }
 
