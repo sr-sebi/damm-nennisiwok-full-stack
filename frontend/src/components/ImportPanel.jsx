@@ -4,6 +4,8 @@ import {
   Box,
   Button,
   Chip,
+  Dialog,
+  DialogContent,
   Divider,
   FormControl,
   FormHelperText,
@@ -227,12 +229,20 @@ export default function ImportPanel({ raceId, channels, onImportFinished }) {
         </Stack>
       )}
 
-      {reportId && (
-        <>
-          <Divider sx={{ my: 3 }} />
-          <ImportReport key={reportId} importId={reportId} onClose={() => setReportId(null)} />
-        </>
-      )}
+      <Dialog
+        open={Boolean(reportId)}
+        onClose={() => setReportId(null)}
+        fullWidth
+        maxWidth="md"
+        scroll="paper"
+        aria-label="Informe de la importación"
+      >
+        <DialogContent>
+          {reportId && (
+            <ImportReport key={reportId} importId={reportId} onClose={() => setReportId(null)} />
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Divider sx={{ my: 3 }} />
       <Typography variant="subtitle1" component="h3" sx={{ fontWeight: 600, mb: 1 }}>

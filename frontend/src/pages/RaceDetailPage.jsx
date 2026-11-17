@@ -22,6 +22,7 @@ import RegistrationForm from '../components/RegistrationForm';
 import RegistrationsTable from '../components/RegistrationsTable';
 import WithdrawDialog from '../components/WithdrawDialog';
 import { formatDate } from '../utils/format';
+import { useNotify } from '../utils/notify';
 
 function useRace(raceId, version) {
   const [result, setResult] = useState({ id: null, data: null, error: null });
@@ -69,7 +70,7 @@ export default function RaceDetailPage() {
   const [version, setVersion] = useState(0);
   const { race, error, loading, replace } = useRace(raceId, version);
   const channels = useChannels();
-  const [notice, setNotice] = useState(null);
+  const notify = useNotify();
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [withdrawing, setWithdrawing] = useState(null);
@@ -104,7 +105,7 @@ export default function RaceDetailPage() {
 
   const handleCreated = (result) => {
     setCreating(false);
-    setNotice({
+    notify({
       severity: result.outcome === 'en_espera' ? 'warning' : 'success',
       text: [result.message, result.possible_duplicate].filter(Boolean).join(' '),
     });
@@ -125,16 +126,16 @@ export default function RaceDetailPage() {
   const handleNotDuplicate = async (registration) => {
     try {
       const result = await clearPossibleDuplicate(registration.id);
-      setNotice({ severity: 'success', text: result.message });
+      notify({ severity: 'success', text: result.message });
       refresh();
     } catch (err) {
-      setNotice({ severity: 'error', text: `No se pudo quitar la marca: ${err.message}` });
+      notify({ severity: 'error', text: `No se pudo quitar la marca: ${err.message}` });
     }
   };
 
   const handleWithdrawn = (result) => {
     setWithdrawing(null);
-    setNotice({ severity: result.already_withdrawn ? 'info' : 'success', text: result.message });
+    notify({ severity: result.already_withdrawn ? 'info' : 'success', text: result.message });
     refresh();
   };
 
@@ -153,7 +154,12 @@ export default function RaceDetailPage() {
         </Typography>
       </Box>
 
-      <RaceSummary race={race} onRaceChanged={handleRaceChanged} onNotice={setNotice} />
+      <RaceSummary
+        race={race}
+        refreshKey={version}
+        onRaceChanged={handleRaceChanged}
+        onNotice={notify}
+      />
 
       {channels.error && (
         <Alert severity="error">
@@ -184,11 +190,6 @@ export default function RaceDetailPage() {
             </span>
           </Tooltip>
         </Stack>
-        {notice && (
-          <Alert severity={notice.severity} onClose={() => setNotice(null)} sx={{ mb: 2 }}>
-            {notice.text}
-          </Alert>
-        )}
         <RegistrationsTable
           raceId={race.id}
           refreshKey={version}

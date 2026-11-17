@@ -16,6 +16,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getConfirmations, retryNotification, sendConfirmations } from '../api/confirmations';
 import { formatDateTime } from '../utils/format';
+import { useNotify } from '../utils/notify';
 
 const POLL_MS = 2000;
 
@@ -24,7 +25,7 @@ const POLL_MS = 2000;
 export default function ConfirmationsPanel({ raceId, onChange }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
-  const [notice, setNotice] = useState(null);
+  const notify = useNotify();
   const [busy, setBusy] = useState(false);
   const [following, setFollowing] = useState(false);
   const onChangeRef = useRef(onChange);
@@ -72,7 +73,7 @@ export default function ConfirmationsPanel({ raceId, onChange }) {
         lastSendSeen.current = next.last_send.id;
         const failedRun = next.last_send.result === 'error';
         const later = !failedRun && next.pending > 0 ? ' Las que faltan se reintentarán solas.' : '';
-        setNotice({
+        notify({
           severity: failedRun ? 'error' : 'success',
           text: `${failedRun ? 'El envío se ha parado: ' : 'Envío terminado: '}${next.last_send.summary}${later}`,
         });
@@ -83,19 +84,18 @@ export default function ConfirmationsPanel({ raceId, onChange }) {
       }
     }, POLL_MS);
     return () => clearInterval(timer);
-  }, [following, load]);
+  }, [following, load, notify]);
 
   const handleSend = async () => {
     lastSendSeen.current = data?.last_send?.id ?? null;
     setBusy(true);
-    setNotice(null);
-    try {
+        try {
       const result = await sendConfirmations(raceId);
-      setNotice({ severity: result.queued ? 'info' : 'success', text: result.message });
+      notify({ severity: result.queued ? 'info' : 'success', text: result.message });
       if (result.queued) setFollowing(true);
       await load();
     } catch (err) {
-      setNotice({ severity: 'error', text: err.message });
+      notify({ severity: 'error', text: err.message });
     } finally {
       setBusy(false);
     }
@@ -103,15 +103,14 @@ export default function ConfirmationsPanel({ raceId, onChange }) {
 
   const handleRetry = async (notificationId) => {
     lastSendSeen.current = data?.last_send?.id ?? null;
-    setNotice(null);
-    try {
+        try {
       const result = await retryNotification(notificationId);
-      setNotice({ severity: 'info', text: result.message });
+      notify({ severity: 'info', text: result.message });
       setFollowing(true);
       await load();
       onChangeRef.current?.();
     } catch (err) {
-      setNotice({ severity: 'error', text: err.message });
+      notify({ severity: 'error', text: err.message });
     }
   };
 
@@ -155,8 +154,7 @@ export default function ConfirmationsPanel({ raceId, onChange }) {
         {data.race_past && (
           <Alert severity="info">La carrera ya se ha celebrado: no se envían confirmaciones.</Alert>
         )}
-        {notice && <Alert severity={notice.severity}>{notice.text}</Alert>}
-        {!notice && !following && data.last_send?.result === 'error' && (
+        {!following && data.last_send?.result === 'error' && (
           <Alert severity="error">
             El último envío se paró ({formatDateTime(data.last_send.finished_at)}):{' '}
             {data.last_send.summary}

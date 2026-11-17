@@ -6,6 +6,7 @@ import {
   CircularProgress,
   Link,
   Paper,
+  Stack,
   Table,
   TableBody,
   TableCell,
@@ -18,7 +19,63 @@ import { useEffect, useState } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { listRaces } from '../api/races';
 import CreateRaceDialog from '../components/CreateRaceDialog';
+import { Meter, OverLimit, StatTile } from '../components/charts';
+import { CHART } from '../utils/chartColors';
 import { formatDate } from '../utils/format';
+import { formatNumber } from '../utils/labels';
+
+const isUpcoming = (race) => race.date >= new Date().toISOString().slice(0, 10);
+
+// «47 de 45», con la barra de ocupación; sin aforo, solo las confirmadas.
+function Occupancy({ race }) {
+  if (race.capacity == null) {
+    return (
+      <Typography variant="body2">
+        {formatNumber(race.confirmed)} confirmadas{' '}
+        <Typography component="span" variant="body2" sx={{ color: CHART.muted }}>
+          · sin aforo
+        </Typography>
+      </Typography>
+    );
+  }
+  const over = race.confirmed - race.capacity;
+  return (
+    <Box>
+      <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+        {formatNumber(race.confirmed)} de {formatNumber(race.capacity)}
+      </Typography>
+      <Meter value={race.confirmed} limit={race.capacity} label={`Ocupación de ${race.name}`} height={6} />
+      {over > 0 && <OverLimit count={over}>por encima del aforo</OverLimit>}
+    </Box>
+  );
+}
+
+// Lo que hay entre todas las carreras, de un vistazo.
+function RacesDashboard({ races }) {
+  const upcoming = races.filter(isUpcoming);
+  const sum = (list, field) => list.reduce((total, race) => total + (race[field] ?? 0), 0);
+  const withCapacity = upcoming.filter((race) => race.capacity != null);
+  const full = withCapacity.filter((race) => race.confirmed >= race.capacity).length;
+  return (
+    <Stack direction="row" useFlexGap sx={{ flexWrap: 'wrap', gap: 2, mb: 3 }}>
+      <StatTile
+        label="Próximas carreras"
+        value={formatNumber(upcoming.length)}
+        hint={`${formatNumber(races.length - upcoming.length)} ya celebradas`}
+      />
+      <StatTile
+        label="Confirmadas en próximas carreras"
+        value={formatNumber(sum(upcoming, 'confirmed'))}
+        hint={`${formatNumber(sum(upcoming, 'waitlisted'))} en lista de espera`}
+      />
+      <StatTile
+        label="Carreras con el aforo lleno"
+        value={formatNumber(full)}
+        hint={`de ${formatNumber(withCapacity.length)} próximas con aforo`}
+      />
+    </Stack>
+  );
+}
 
 export default function RacesPage() {
   const navigate = useNavigate();
@@ -66,6 +123,8 @@ export default function RacesPage() {
         </Alert>
       )}
 
+      {!loading && races.length > 0 && <RacesDashboard races={races} />}
+
       {loading ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
           <CircularProgress />
@@ -78,15 +137,14 @@ export default function RacesPage() {
                 <TableCell>Carrera</TableCell>
                 <TableCell>Fecha</TableCell>
                 <TableCell>Lugar</TableCell>
-                <TableCell align="right">Aforo</TableCell>
-                <TableCell align="right">Confirmadas</TableCell>
+                <TableCell sx={{ minWidth: 200 }}>Ocupación</TableCell>
                 <TableCell align="right">En espera</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {races.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                  <TableCell colSpan={5} align="center" sx={{ py: 4, color: 'text.secondary' }}>
                     No hay carreras. Crea la primera con «Nueva carrera».
                   </TableCell>
                 </TableRow>
@@ -100,9 +158,10 @@ export default function RacesPage() {
                   </TableCell>
                   <TableCell>{formatDate(race.date)}</TableCell>
                   <TableCell>{race.location || '—'}</TableCell>
-                  <TableCell align="right">{race.capacity ?? 'Sin límite'}</TableCell>
-                  <TableCell align="right">{race.confirmed ?? '—'}</TableCell>
-                  <TableCell align="right">{race.waitlisted ?? '—'}</TableCell>
+                  <TableCell>
+                    <Occupancy race={race} />
+                  </TableCell>
+                  <TableCell align="right">{formatNumber(race.waitlisted)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

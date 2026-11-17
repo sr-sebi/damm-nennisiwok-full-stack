@@ -13,28 +13,11 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { fieldErrors } from '../api/client';
-import { updateRaceCapacity } from '../api/races';
+import { getRaceStats, updateRaceCapacity } from '../api/races';
 import { formatNumber } from '../utils/labels';
-
-function Figure({ label, value, hint }) {
-  return (
-    <Box sx={{ minWidth: 120 }}>
-      <Typography variant="body2" color="text.secondary">
-        {label}
-      </Typography>
-      <Typography variant="h5" component="p" sx={{ fontWeight: 600 }}>
-        {value}
-      </Typography>
-      {hint && (
-        <Typography variant="caption" color="text.secondary">
-          {hint}
-        </Typography>
-      )}
-    </Box>
-  );
-}
+import { BarList, Meter, OverLimit, StatTile } from './charts';
 
 function CapacityDialog({ race, open, onClose, onSaved }) {
   const [value, setValue] = useState(race.capacity ?? '');
@@ -88,9 +71,29 @@ function CapacityDialog({ race, open, onClose, onSaved }) {
   );
 }
 
-export default function RaceSummary({ race, onRaceChanged, onNotice }) {
+function useStats(raceId, refreshKey) {
+  const [result, setResult] = useState({ key: null, data: null, error: null });
+  const key = `${raceId}-${refreshKey}`;
+  useEffect(() => {
+    let ignore = false;
+    getRaceStats(raceId)
+      .then((data) => {
+        if (!ignore) setResult({ key, data, error: null });
+      })
+      .catch((err) => {
+        if (!ignore) setResult((current) => ({ ...current, key, error: err.message }));
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [raceId, key]);
+  return result;
+}
+
+// Resumen de la carrera: plazas, estados, categorías, canales y emails.
+export default function RaceSummary({ race, refreshKey, onRaceChanged, onNotice }) {
   const [editing, setEditing] = useState(false);
-  const free = race.capacity == null ? null : Math.max(0, race.capacity - race.confirmed);
+  const { data: stats, error } = useStats(race.id, refreshKey);
 
   const handleSaved = (result) => {
     setEditing(false);
@@ -106,21 +109,57 @@ export default function RaceSummary({ race, onRaceChanged, onNotice }) {
     });
   };
 
+  const confirmed = stats?.confirmed ?? race.confirmed;
+  const capacity = race.capacity;
+  const over = capacity != null && confirmed > capacity ? confirmed - capacity : 0;
+  const free = capacity == null ? null : Math.max(0, capacity - confirmed);
+  const emails = stats?.emails;
+
   return (
-    <Paper variant="outlined" sx={{ p: 3 }}>
-      <Stack direction="row" spacing={4} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
-        <Figure
-          label="Aforo"
-          value={race.capacity == null ? 'Sin límite' : formatNumber(race.capacity)}
-          hint={free == null ? null : `${formatNumber(free)} plazas libres`}
+    <Stack spacing={2}>
+      <Stack direction="row" useFlexGap sx={{ flexWrap: 'wrap', gap: 2 }}>
+        <StatTile
+          label={capacity == null ? 'Confirmadas (sin aforo)' : `Confirmadas · aforo ${formatNumber(capacity)}`}
+          value={formatNumber(confirmed)}
+          hint={over ? null : free == null ? 'Sin límite de plazas.' : `${formatNumber(free)} plazas libres`}
+        >
+          <Meter value={confirmed} limit={capacity} label="Confirmadas frente al aforo" />
+          {over > 0 && <OverLimit count={over}>por encima del aforo: las bajas no sacan a nadie de la espera hasta bajar de él</OverLimit>}
+          <Button size="small" startIcon={<EditIcon />} onClick={() => setEditing(true)} sx={{ mt: 1, ml: -1 }}>
+            Cambiar aforo
+          </Button>
+        </StatTile>
+        <StatTile
+          label="En lista de espera"
+          value={formatNumber(stats?.waitlisted ?? race.waitlisted)}
+          hint={capacity == null ? 'Sin aforo no hay lista de espera.' : 'Entran por orden al quedar plazas.'}
         />
-        <Figure label="Confirmadas" value={formatNumber(race.confirmed)} />
-        <Figure label="En lista de espera" value={formatNumber(race.waitlisted)} />
-        <Box sx={{ flex: 1 }} />
-        <Button startIcon={<EditIcon />} onClick={() => setEditing(true)}>
-          Cambiar aforo
-        </Button>
+        <StatTile label="Bajas" value={stats ? formatNumber(stats.withdrawn) : '—'} hint="El dorsal no se reutiliza." />
+        <StatTile
+          label="Emails de confirmación enviados"
+          value={emails ? formatNumber(emails.sent) : '—'}
+          hint={emails?.failed ? `${formatNumber(emails.failed)} fallidos` : `de ${formatNumber(confirmed)} confirmadas`}
+        />
       </Stack>
+      {stats && (stats.possible_duplicates > 0 || stats.missing > 0) && (
+        <Stack direction="row" spacing={3} useFlexGap sx={{ flexWrap: 'wrap' }}>
+          {stats.possible_duplicates > 0 && (
+            <OverLimit count={stats.possible_duplicates}>posibles duplicados por revisar</OverLimit>
+          )}
+          {stats.missing > 0 && (
+            <OverLimit count={stats.missing}>no aparecen en el listado de su plataforma</OverLimit>
+          )}
+        </Stack>
+      )}
+      {error && !stats && (
+        <Alert severity="warning">No se pudieron cargar las cifras de la carrera: {error}</Alert>
+      )}
+      {stats && (
+        <Stack direction="row" useFlexGap sx={{ flexWrap: 'wrap', gap: 2 }}>
+          <BarList title="Inscritas por categoría (confirmadas y en espera)" rows={stats.by_category} />
+          <BarList title="Inscritas por canal (confirmadas y en espera)" rows={stats.by_channel} />
+        </Stack>
+      )}
       {editing && (
         <CapacityDialog
           race={race}
@@ -129,6 +168,6 @@ export default function RaceSummary({ race, onRaceChanged, onNotice }) {
           onSaved={handleSaved}
         />
       )}
-    </Paper>
+    </Stack>
   );
 }

@@ -2,6 +2,7 @@ import DirectionsRunIcon from '@mui/icons-material/DirectionsRun';
 import SettingsIcon from '@mui/icons-material/Settings';
 import { AppBar, Box, Button, Container, Toolbar, Typography } from '@mui/material';
 import { Link as RouterLink, Route, Routes } from 'react-router-dom';
+import NotificationsProvider from './components/NotificationsProvider';
 import NotFoundPage from './pages/NotFoundPage';
 import RaceDetailPage from './pages/RaceDetailPage';
 import RacesPage from './pages/RacesPage';
@@ -28,12 +29,14 @@ export default function App() {
         </Toolbar>
       </AppBar>
       <Container maxWidth="lg" sx={{ py: 4 }}>
-        <Routes>
-          <Route path="/" element={<RacesPage />} />
-          <Route path="/races/:raceId" element={<RaceDetailPage />} />
-          <Route path="/configuracion" element={<SettingsPage />} />
-          <Route path="*" element={<NotFoundPage />} />
-        </Routes>
+        <NotificationsProvider>
+          <Routes>
+            <Route path="/" element={<RacesPage />} />
+            <Route path="/races/:raceId" element={<RaceDetailPage />} />
+            <Route path="/configuracion" element={<SettingsPage />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+        </NotificationsProvider>
       </Container>
     </Box>
   );

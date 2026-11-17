@@ -11,3 +11,5 @@ export const updateRaceCapacity = (raceId, capacity) =>
   apiFetch(`/races/${raceId}/`, { method: 'PATCH', body: { capacity } });
 
 export const listChannels = () => apiFetch('/channels/');
+
+export const getRaceStats = (raceId) => apiFetch(`/races/${raceId}/stats/`);
