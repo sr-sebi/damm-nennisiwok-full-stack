@@ -5,7 +5,8 @@ from django.db.models import Count, Q
 from rest_framework import serializers
 
 from races.domain.issues import Issue, IssueCode, group_message
-from races.models import Channel, ImportBatch, ImportIssue, Race
+from races.domain.rules import category_for
+from races.models import Channel, ImportBatch, ImportIssue, Race, Registration
 
 ALLOWED_EXTENSIONS = {".xlsx": Channel.Format.XLSX, ".csv": Channel.Format.CSV}
 EXAMPLES_PER_GROUP = 5
@@ -27,17 +28,156 @@ KIND_TITLES = {
 }
 
 
-class RaceSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Race
-        fields = ["id", "name", "date", "location", "capacity", "created_at"]
-        read_only_fields = ["created_at"]
-
-
 class ChannelSerializer(serializers.ModelSerializer):
     class Meta:
         model = Channel
         fields = ["id", "code", "name", "kind", "format"]
+
+
+class RaceSerializer(serializers.ModelSerializer):
+    # Cuentas anotadas en la consulta de la vista (`with_counts`); en un alta recién creada, 0.
+    confirmed = serializers.SerializerMethodField()
+    waitlisted = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Race
+        fields = [
+            "id",
+            "name",
+            "date",
+            "location",
+            "capacity",
+            "confirmed",
+            "waitlisted",
+            "created_at",
+        ]
+        read_only_fields = ["created_at"]
+
+    def get_confirmed(self, race):
+        return getattr(race, "confirmed", 0)
+
+    def get_waitlisted(self, race):
+        return getattr(race, "waitlisted", 0)
+
+
+class StrictSerializer(serializers.Serializer):
+    """Rechaza campos que no conoce: que no parezca que se ha cambiado algo que no se cambia."""
+
+    def validate(self, attrs):
+        unknown = sorted(set(self.initial_data) - set(self.fields))
+        if unknown:
+            raise serializers.ValidationError(
+                {name: ["Este campo no se puede cambiar desde aquí."] for name in unknown}
+            )
+        return attrs
+
+
+class RaceCapacitySerializer(StrictSerializer):
+    capacity = serializers.IntegerField(
+        min_value=1,
+        allow_null=True,
+        error_messages={"min_value": "El aforo tiene que ser al menos 1 (vacío = sin límite)."},
+    )
+
+
+def _text_field():
+    # Sin recortar ni limitar: limpiar y validar es cosa del normalizador y de las reglas, igual
+    # que en una importación.
+    return serializers.CharField(
+        required=False, allow_blank=True, allow_null=True, trim_whitespace=False
+    )
+
+
+class RegistrationDataSerializer(StrictSerializer):
+    first_name = _text_field()
+    last_name = _text_field()
+    email = _text_field()
+    birth_date = _text_field()  # AAAA-MM-DD (o dd/mm/aaaa)
+    phone = _text_field()
+    shirt_size = _text_field()
+
+
+class RegistrationCreateSerializer(RegistrationDataSerializer):
+    channel = serializers.SlugRelatedField(
+        slug_field="code",
+        queryset=Channel.objects.all(),
+        error_messages={
+            "required": "Falta el canal.",
+            "does_not_exist": "No existe el canal «{value}».",
+        },
+    )
+
+
+class RegistrationSummarySerializer(serializers.ModelSerializer):
+    """Lo justo para nombrar otra inscripción en un aviso."""
+
+    channel = serializers.CharField(source="channel.name", read_only=True)
+
+    class Meta:
+        model = Registration
+        fields = [
+            "id",
+            "bib",
+            "status",
+            "waitlist_position",
+            "first_name",
+            "last_name",
+            "email",
+            "channel",
+        ]
+        read_only_fields = fields
+
+
+class RegistrationSerializer(serializers.ModelSerializer):
+    """Una fila de la lista. La categoría se calcula con la fecha de la carrera (no se guarda)."""
+
+    channel = ChannelSerializer(read_only=True)
+    also_channels = serializers.SerializerMethodField()
+    category = serializers.SerializerMethodField()
+    possible_duplicate_of = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Registration
+        fields = [
+            "id",
+            "race",
+            "bib",
+            "status",
+            "waitlist_position",
+            "first_name",
+            "last_name",
+            "email",
+            "birth_date",
+            "category",
+            "phone",
+            "shirt_size",
+            "channel",
+            "also_channels",
+            "possible_duplicate_of",
+            "missing_since",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+    def get_category(self, registration):
+        race_date = self.context.get("race_date") or registration.race.date
+        return category_for(registration.birth_date, race_date)
+
+    def get_also_channels(self, registration):
+        # `.all()` usa lo precargado con prefetch_related: sin consulta por fila.
+        return [channel.name for channel in registration.also_channels.all()]
+
+    def get_possible_duplicate_of(self, registration):
+        other = registration.possible_duplicate_of
+        if other is None:
+            return None
+        return {
+            "id": other.pk,
+            "bib": other.bib,
+            "first_name": other.first_name,
+            "last_name": other.last_name,
+        }
 
 
 class ImportUploadSerializer(serializers.Serializer):
