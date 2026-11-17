@@ -78,12 +78,15 @@ export default function RacesPage() {
                 <TableCell>Carrera</TableCell>
                 <TableCell>Fecha</TableCell>
                 <TableCell>Lugar</TableCell>
+                <TableCell align="right">Aforo</TableCell>
+                <TableCell align="right">Confirmadas</TableCell>
+                <TableCell align="right">En espera</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {races.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={3} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                  <TableCell colSpan={6} align="center" sx={{ py: 4, color: 'text.secondary' }}>
                     No hay carreras. Crea la primera con «Nueva carrera».
                   </TableCell>
                 </TableRow>
@@ -97,6 +100,9 @@ export default function RacesPage() {
                   </TableCell>
                   <TableCell>{formatDate(race.date)}</TableCell>
                   <TableCell>{race.location || '—'}</TableCell>
+                  <TableCell align="right">{race.capacity ?? 'Sin límite'}</TableCell>
+                  <TableCell align="right">{race.confirmed ?? '—'}</TableCell>
+                  <TableCell align="right">{race.waitlisted ?? '—'}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
