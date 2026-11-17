@@ -118,3 +118,7 @@ LOGGING = {
         "races": {"handlers": ["console"], "level": "INFO"},
     },
 }
+
+# Importaciones: tope del fichero subido y minutos sin avanzar para darla por caída.
+IMPORT_MAX_UPLOAD_MB = 20
+IMPORT_STALE_MINUTES = int(os.environ.get("IMPORT_STALE_MINUTES", "10"))
