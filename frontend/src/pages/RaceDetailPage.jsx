@@ -13,6 +13,7 @@ import {
 import { useCallback, useEffect, useState } from 'react';
 import { Link as RouterLink, useParams } from 'react-router-dom';
 import { getRace, listChannels } from '../api/races';
+import ConfirmationsPanel from '../components/ConfirmationsPanel';
 import EditRegistrationDialog from '../components/EditRegistrationDialog';
 import ImportPanel from '../components/ImportPanel';
 import RaceSummary from '../components/RaceSummary';
@@ -151,6 +152,8 @@ export default function RaceDetailPage() {
       )}
 
       <ImportPanel raceId={race.id} channels={channels.data} onImportFinished={refresh} />
+
+      <ConfirmationsPanel key={`${race.id}-${version}`} raceId={race.id} onChange={refresh} />
 
       <Paper variant="outlined" sx={{ p: 3 }}>
         <Stack direction="row" sx={{ alignItems: 'center', mb: 2 }}>

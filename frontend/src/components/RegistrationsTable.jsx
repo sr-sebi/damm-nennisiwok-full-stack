@@ -38,6 +38,21 @@ const COLUMNS = 8;
 
 const STATUS_COLORS = { confirmada: 'success', en_espera: 'warning', baja: 'default' };
 
+const EMAIL_MARKS = {
+  pendiente: { label: 'Email pendiente', color: 'default' },
+  enviando: { label: 'Enviando email', color: 'default' },
+  enviada: { label: 'Email enviado', color: 'success' },
+  fallida: { label: 'Email fallido', color: 'error' },
+};
+
+// Estado del email de confirmación. Sin estado (en espera, baja, posible duplicado), nada.
+function EmailMark({ status }) {
+  const mark = status && EMAIL_MARKS[status.status];
+  if (!mark) return null;
+  const chip = <Chip size="small" variant="outlined" color={mark.color} label={mark.label} />;
+  return status.last_error ? <Tooltip title={status.last_error}>{chip}</Tooltip> : chip;
+}
+
 function Marks({ registration, onSearch }) {
   const duplicate = registration.possible_duplicate_of;
   return (
@@ -77,6 +92,7 @@ function Marks({ registration, onSearch }) {
           <Chip size="small" color="info" variant="outlined" label={`También por ${registration.also_channels.join(', ')}`} />
         </Tooltip>
       )}
+      <EmailMark status={registration.email_status} />
       {registration.missing_since && registration.status !== 'baja' && (
         <Tooltip title="Ya no aparece en el listado de su plataforma. Si se ha dado de baja allí, confirma la baja.">
           <Chip
