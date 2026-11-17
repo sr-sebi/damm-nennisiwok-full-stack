@@ -119,7 +119,7 @@ def group_issues(issues: Iterable[Issue], max_examples: int = 3) -> list[IssueGr
             value=key[2],
             count=counts[key],
             examples=tuple(examples[key]),
-            message=_group_message(first[key]),
+            message=group_message(first[key]),
         )
         for key in counts
     ]
@@ -175,7 +175,7 @@ def _message(code: IssueCode, field: str, raw: str, params: dict[str, Any]) -> s
     return f"Incidencia en {label}."
 
 
-def _group_message(issue: Issue) -> str:
+def group_message(issue: Issue) -> str:
     """Texto del grupo: el de la incidencia si el grupo es por valor; si no, uno genérico."""
     if issue.code.group_by_value:
         return issue.message
