@@ -42,6 +42,7 @@ class IssueCode(str, Enum):
 
     # Forma: el valor no se puede interpretar.
     BAD_ROW = ("fila_no_valida", False)
+    TOO_MANY_COLUMNS = ("columnas_de_mas", False)
     UNEXPECTED_TYPE = ("tipo_inesperado", True)
     TOO_LONG = ("demasiado_largo", False)
     INVALID_DATE = ("fecha_no_valida", False)
@@ -138,6 +139,11 @@ def _message(code: IssueCode, field: str, raw: str, params: dict[str, Any]) -> s
     label = _label(field)
     if code is IssueCode.BAD_ROW:
         return "La fila no tiene un formato que se pueda leer."
+    if code is IssueCode.TOO_MANY_COLUMNS:
+        return (
+            f"La fila tiene {params['found']} columnas y la cabecera {params['expected']}: "
+            "puede que un valor lleve el separador sin comillas."
+        )
     if code is IssueCode.UNEXPECTED_TYPE:
         return f"No se entiende {label}: llega un valor de tipo {params['type_name']}."
     if code is IssueCode.TOO_LONG:
@@ -176,6 +182,7 @@ def _group_message(issue: Issue) -> str:
     label = _label(issue.field)
     generic = {
         IssueCode.BAD_ROW: "Filas con un formato que no se puede leer",
+        IssueCode.TOO_MANY_COLUMNS: "Filas con más columnas que la cabecera",
         IssueCode.TOO_LONG: f"{label.capitalize()} demasiado largo",
         IssueCode.INVALID_DATE: "Fecha de nacimiento no válida",
         IssueCode.INVALID_PHONE: "Teléfono no válido",
