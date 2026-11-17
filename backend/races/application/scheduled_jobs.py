@@ -11,8 +11,9 @@ cerrojo de `JobRun` impide dos envíos a la vez.
 2. **Envío programado**: si está activado, ya es la hora de hoy y hoy no se ha hecho (ni con error),
    se envían las confirmaciones pendientes de todas las carreras. Un error deja el día hecho: se ve
    en la pantalla y se puede enviar con el botón, en vez de reintentar cada minuto contra un
-   proveedor que falla. Un envío que lleva `RUN_STALE_AFTER` «en marcha» (el worker murió) se da
-   por caído y el mismo latido lo vuelve a lanzar: la bandeja de salida no repite lo ya enviado.
+   proveedor que falla. Un envío que lleva `RUN_STALE_AFTER` «en marcha» (el worker murió) pasa a
+   «caído», que no cuenta como hecho, y el mismo latido lo vuelve a lanzar: la bandeja de salida no
+   repite lo ya enviado.
 """
 
 from __future__ import annotations
@@ -92,13 +93,7 @@ def run_scheduled_send(now: datetime, config: Settings, send: Callable | None = 
             job, Result.IDLE, f"Todavía no es la hora ({config.auto_send_time:%H:%M})."
         )
     day_start = local.replace(hour=0, minute=0, second=0, microsecond=0)
-    done_today = JobRun.objects.filter(
-        job=job,
-        result__in=[Result.OK, Result.ERROR],
-        started_at__gte=day_start,
-        started_at__lt=day_start + timedelta(days=1),
-    ).exists()
-    if done_today:
+    if _done_today(job, day_start):
         return JobOutcome(job, Result.IDLE, "El envío de hoy ya está hecho.")
 
     _expire_stale_runs(job, now)
@@ -121,6 +116,11 @@ def run_scheduled_send(now: datetime, config: Settings, send: Callable | None = 
         logger.info("Latido: envío programado ocupado")
         return JobOutcome(job, Result.LOCKED, summary)
 
+    # Con el cerrojo cogido, otra vez: un latido que se solapó con este puede haber terminado el
+    # envío de hoy entre la primera comprobación y el cerrojo.
+    if _done_today(job, day_start):
+        run.delete()
+        return JobOutcome(job, Result.IDLE, "El envío de hoy ya está hecho.")
     logger.info("Latido: envío programado %s empieza", run.pk)
     try:
         result, summary = _send_all(send)
@@ -132,6 +132,15 @@ def run_scheduled_send(now: datetime, config: Settings, send: Callable | None = 
     run.save(update_fields=["result", "summary", "finished_at"])
     logger.info("Envío programado %s: %s", run.pk, result)
     return JobOutcome(job, result, summary)
+
+
+def _done_today(job: str, day_start: datetime) -> bool:
+    return JobRun.objects.filter(
+        job=job,
+        result__in=[Result.OK, Result.ERROR],
+        started_at__gte=day_start,
+        started_at__lt=day_start + timedelta(days=1),
+    ).exists()
 
 
 def _send_all(send: Callable | None) -> tuple[str, str]:
@@ -162,7 +171,7 @@ def _expire_stale_runs(job: str, now: datetime) -> None:
     for run in JobRun.objects.filter(
         job=job, result=Result.RUNNING, started_at__lt=now - RUN_STALE_AFTER
     ):
-        run.result = Result.ERROR
+        run.result = Result.ABANDONED
         run.finished_at = now
         since = timezone.localtime(run.started_at)
         run.summary = (

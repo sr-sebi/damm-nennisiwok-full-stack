@@ -8,6 +8,7 @@ leer 17 líneas iguales.
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
@@ -90,6 +91,14 @@ def raw_text(value: Any) -> str:
         text = str(value)
     except Exception:
         text = f"<{type(value).__name__}>"
+    if not text.isprintable():
+        # Un NUL o un carácter de control no se puede guardar en todos los motores (PostgreSQL
+        # rechaza el NUL) y no se ve en el informe: los saltos y tabuladores pasan a espacio.
+        text = "".join(
+            " " if ch in "\t\n\r" else ch
+            for ch in text
+            if ch in "\t\n\r" or unicodedata.category(ch) != "Cc"
+        )
     if len(text) > RAW_TEXT_LIMIT:
         return text[:RAW_TEXT_LIMIT] + "…"
     return text

@@ -25,6 +25,7 @@ from enum import Enum
 
 from django.db import transaction
 from django.db.models import Max
+from django.utils import timezone
 
 from races.domain.identity import Difference, differences, name_key
 from races.domain.normalize import CanonicalRegistration
@@ -128,6 +129,11 @@ class RaceRegistrar:
         registration.status = Status.WITHDRAWN
         registration.waitlist_position = None
         registration.save(update_fields=["status", "waitlist_position", "updated_at"])
+        # Si alguien estaba marcada como posible duplicado de esta, ya no hay con quién confundirla:
+        # se quita la marca (si no, no recibiría nunca la confirmación).
+        Registration.objects.filter(possible_duplicate_of=registration).update(
+            possible_duplicate_of=None, updated_at=timezone.now()
+        )
         return WithdrawResult(registration, promoted=self.fill_vacancies())
 
     def change_capacity(self, capacity: int | None) -> list[Registration]:
@@ -142,8 +148,12 @@ class RaceRegistrar:
         """Pasa a confirmadas, por orden de llegada, tantas en espera como plazas libres haya."""
         promoted = []
         while self._has_room():
+            # Quien ya no aparece en el listado de su plataforma no coge una plaza: puede que se
+            # haya dado de baja allí. Si vuelve a aparecer, la marca se quita y vuelve a su turno.
             first = (
-                Registration.objects.filter(race=self.race, status=Status.WAITLISTED)
+                Registration.objects.filter(
+                    race=self.race, status=Status.WAITLISTED, missing_since__isnull=True
+                )
                 .order_by("waitlist_position")
                 .first()
             )
@@ -238,6 +248,17 @@ def withdraw(registration_id: int) -> WithdrawResult:
         # Se vuelve a leer con la carrera ya bloqueada: el estado puede haber cambiado.
         registration = Registration.objects.get(pk=registration_id)
         return registrar.withdraw(registration)
+
+
+def clear_possible_duplicate(registration_id: int) -> Registration:
+    """Una persona decide que no es la misma: se quita la marca y ya puede recibir el email."""
+    race_id = Registration.objects.values_list("race_id", flat=True).get(pk=registration_id)
+    with race_registrar(race_id):
+        registration = Registration.objects.get(pk=registration_id)
+        if registration.possible_duplicate_of_id is not None:
+            registration.possible_duplicate_of = None
+            registration.save(update_fields=["possible_duplicate_of", "updated_at"])
+        return registration
 
 
 def change_capacity(race_id: int, capacity: int | None) -> list[Registration]:

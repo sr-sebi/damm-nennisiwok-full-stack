@@ -40,7 +40,7 @@ from django.utils import timezone
 
 from races.application.channel_options import ChannelConfigError, options_for
 from races.application.register import Outcome, RaceRegistrar, RegisterResult, race_registrar
-from races.domain.identity import describe_differences, name_key
+from races.domain.identity import Difference, describe_differences, differences, name_key
 from races.domain.issues import Issue, raw_text
 from races.domain.normalize import CanonicalRegistration, is_blank, normalize
 from races.domain.rules import validate
@@ -164,6 +164,10 @@ class PreparedRow:
     values: CanonicalRegistration
     issues: tuple[Issue, ...]
     raw: Mapping[str, Any]
+    # Repetida: la línea de la primera con ese email y lo que trae distinto (sin contar el email,
+    # que es el mismo). Con diferencias puede ser otra persona con el mismo email: se avisa.
+    first_line: int | None = None
+    differences: tuple[Difference, ...] = ()
 
 
 def run_batch(batch_id: int) -> None:
@@ -226,7 +230,7 @@ def prepare(records: Iterable, options, race_date) -> tuple[list[PreparedRow], s
     """
     rows: list[PreparedRow] = []
     present: set[str] = set()
-    valid_emails: set[str] = set()
+    first_valid: dict[str, tuple[int, CanonicalRegistration]] = {}
     for record in records:
         if not record.issues and is_blank(record.values):
             rows.append(PreparedRow(record.line, "vacia", CanonicalRegistration(), (), {}))
@@ -237,13 +241,16 @@ def prepare(records: Iterable, options, race_date) -> tuple[list[PreparedRow], s
         if values.email_norm:
             present.add(values.email_norm)
         if issues:
-            state = "rechazada"
-        elif values.email_norm in valid_emails:
-            state = "repetida"
+            rows.append(PreparedRow(record.line, "rechazada", values, tuple(issues), record.values))
+        elif values.email_norm in first_valid:
+            first_line, first = first_valid[values.email_norm]
+            found = tuple(d for d in differences(first, values) if d.field != "email")
+            rows.append(
+                PreparedRow(record.line, "repetida", values, (), record.values, first_line, found)
+            )
         else:
-            state = "valida"
-            valid_emails.add(values.email_norm)
-        rows.append(PreparedRow(record.line, state, values, tuple(issues), record.values))
+            first_valid[values.email_norm] = (record.line, values)
+            rows.append(PreparedRow(record.line, "valida", values, (), record.values))
     return rows, present
 
 
@@ -259,6 +266,8 @@ def save_lot(batch: ImportBatch, lot: Sequence[PreparedRow], seen_before: set[st
                 counts["blank"] += 1
             elif row.state == "repetida":
                 counts["repeated"] += 1
+                if row.differences:
+                    issues.append(_repeated_issue(batch, row, seen_before))
             elif row.state == "rechazada":
                 counts["rejected"] += 1
                 issues.extend(_rejected_issues(batch, row, seen_before))
@@ -386,7 +395,6 @@ def _already_registered_issue(
 ) -> ImportIssue:
     existing = result.registration
     channel = channel_names.get(existing.channel_id, "otro canal")
-    where = f"dorsal {existing.bib}" if existing.bib else existing.get_status_display().lower()
     differences = describe_differences(result.differences)
     fingerprint = _fingerprint(Kind.ALREADY_REGISTERED, existing.pk, differences)
     return ImportIssue(
@@ -394,7 +402,25 @@ def _already_registered_issue(
         kind=Kind.ALREADY_REGISTERED,
         line=row.line,
         registration=existing,
-        message=f"Ya inscrita por {channel} ({where}): no se le ha dado otro dorsal.",
+        message=(f"Ya inscrita por {channel} ({_where(existing)}): no se le ha dado otro dorsal."),
+        differences=differences,
+        raw=_raw_json(row.raw),
+        fingerprint=fingerprint,
+        is_new=fingerprint not in seen_before,
+    )
+
+
+def _repeated_issue(batch, row: PreparedRow, seen_before: set[str]) -> ImportIssue:
+    differences = describe_differences(row.differences)
+    fingerprint = _fingerprint(Kind.REPEATED, row.values.email_norm, differences)
+    return ImportIssue(
+        batch=batch,
+        kind=Kind.REPEATED,
+        line=row.line,
+        message=(
+            f"Mismo email que la línea {row.first_line}, con otros datos: se ha inscrito la de la "
+            f"línea {row.first_line}. Si son dos personas, esta necesita su propio email."
+        ),
         differences=differences,
         raw=_raw_json(row.raw),
         fingerprint=fingerprint,
@@ -404,7 +430,6 @@ def _already_registered_issue(
 
 def _possible_duplicate_issue(batch, row, result: RegisterResult, seen_before) -> ImportIssue:
     new, other = result.registration, result.possible_duplicate_of
-    where = f"dorsal {other.bib}" if other.bib else other.get_status_display().lower()
     fingerprint = _fingerprint(Kind.POSSIBLE_DUPLICATE, new.pk, other.pk)
     return ImportIssue(
         batch=batch,
@@ -413,12 +438,22 @@ def _possible_duplicate_issue(batch, row, result: RegisterResult, seen_before) -
         registration=new,
         message=(
             f"Mismo nombre y fecha de nacimiento que {other.first_name} {other.last_name} "
-            f"({where}), con otro email. Se ha inscrito aparte: revisa si es la misma persona."
+            f"({_where(other)}), con otro email. Se ha inscrito aparte: revisa si es la misma "
+            "persona."
         ),
         raw=_raw_json(row.raw),
         fingerprint=fingerprint,
         is_new=fingerprint not in seen_before,
     )
+
+
+def _where(registration: Registration) -> str:
+    """«dorsal 5», «en lista de espera, posición 3», «dada de baja, tenía el dorsal 5»."""
+    if registration.status == Registration.Status.WAITLISTED:
+        return f"en lista de espera, posición {registration.waitlist_position}"
+    if registration.status == Registration.Status.WITHDRAWN:
+        return f"dada de baja, tenía el dorsal {registration.bib}"
+    return f"dorsal {registration.bib}"
 
 
 def _raw_json(raw: Mapping[str, Any]) -> str:

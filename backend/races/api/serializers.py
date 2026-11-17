@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from django.conf import settings
-from django.db.models import Count, Q
+from django.db.models import Case, Count, IntegerField, Q, Value, When
 from rest_framework import serializers
 
 from races.application.send_confirmations import is_eligible
@@ -26,6 +26,7 @@ EXAMPLES_PER_GROUP = 5
 KIND_ORDER = [
     ImportIssue.Kind.ALREADY_REGISTERED,
     ImportIssue.Kind.POSSIBLE_DUPLICATE,
+    ImportIssue.Kind.REPEATED,
     ImportIssue.Kind.REJECTED,
     ImportIssue.Kind.MISSING,
 ]
@@ -35,6 +36,9 @@ KIND_TITLES = {
     ),
     ImportIssue.Kind.POSSIBLE_DUPLICATE: (
         "Posibles duplicados: mismo nombre y fecha de nacimiento con otro email"
+    ),
+    ImportIssue.Kind.REPEATED: (
+        "Mismo email que otra fila del fichero, con otros datos: solo se ha inscrito la primera"
     ),
     ImportIssue.Kind.MISSING: "No aparecen en este listado (siguen inscritas)",
 }
@@ -251,6 +255,11 @@ class ConfirmationStatusSerializer(serializers.Serializer):
     failed = serializers.IntegerField()
     held_duplicates = serializers.IntegerField()
     failures = NotificationSerializer(many=True)
+    last_send = serializers.SerializerMethodField()
+
+    def get_last_send(self, data):
+        run = data["last_send"]
+        return JobRunSerializer(run).data if run else None
 
 
 class ImportUploadSerializer(serializers.Serializer):
@@ -371,6 +380,17 @@ class ImportBatchSerializer(serializers.ModelSerializer):
         ]
 
 
+def issue_order():
+    """Por línea, con las que no tienen (ausentes) al final en todos los motores.
+
+    PostgreSQL ordena los NULL al final y SQL Server al principio.
+    """
+    without_line_last = Case(
+        When(line__isnull=True, then=Value(1)), default=Value(0), output_field=IntegerField()
+    )
+    return (without_line_last, "line", "id")
+
+
 class ImportReportSerializer(ImportBatchSerializer):
     issue_groups = serializers.SerializerMethodField()
 
@@ -390,7 +410,7 @@ class ImportReportSerializer(ImportBatchSerializer):
             examples = list(
                 batch.issues.filter(**filters)
                 .select_related("registration")
-                .order_by("line", "id")[:EXAMPLES_PER_GROUP]
+                .order_by(*issue_order())[:EXAMPLES_PER_GROUP]
             )
             groups.append(
                 {

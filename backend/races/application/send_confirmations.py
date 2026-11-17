@@ -67,7 +67,7 @@ from races.infrastructure.email import (
     active_provider_name,
     get_provider,
 )
-from races.models import Notification, Race, Registration, Settings
+from races.models import JobRun, Notification, Race, Registration, Settings
 
 logger = logging.getLogger(__name__)
 
@@ -139,13 +139,15 @@ class CannotRetry(Exception):
 
 
 def eligible_q(today: date, prefix: str = "") -> Q:
-    """Confirmada con dorsal, sin marca de posible duplicado, en una carrera no celebrada."""
+    """Confirmada con dorsal, sin marca de posible duplicado ni de ausente, en carrera futura."""
     return Q(
         **{
             f"{prefix}status": Registration.Status.CONFIRMED,
             f"{prefix}bib__isnull": False,
             f"{prefix}possible_duplicate_of__isnull": True,
             f"{prefix}race__date__gte": today,
+            # No aparece en el listado de su plataforma: hasta que se confirme o vuelva, no.
+            f"{prefix}missing_since__isnull": True,
         }
     )
 
@@ -155,6 +157,7 @@ def is_eligible(registration: Registration, race_date: date, today: date | None 
         registration.status == Registration.Status.CONFIRMED
         and registration.bib is not None
         and registration.possible_duplicate_of_id is None
+        and registration.missing_since is None
         and race_date >= (today or timezone.localdate())
     )
 
@@ -166,6 +169,8 @@ def ineligible_reason(registration: Registration, today: date | None = None) -> 
         return "La inscripción ya no está confirmada (está de baja o en lista de espera)."
     if registration.possible_duplicate_of_id is not None:
         return "La inscripción tiene la marca de posible duplicado: revísala antes de enviar."
+    if registration.missing_since is not None:
+        return "No aparece en el listado de su plataforma: confirma la baja o espera al siguiente."
     return ""
 
 
@@ -242,6 +247,11 @@ def race_status(race: Race) -> dict:
         "failed": by_status.get(N.FAILED, 0),
         "held_duplicates": held_duplicates,
         "failures": list(failures),
+        # El último envío con el botón: el panel sabe así que ha terminado (y por qué, si falló:
+        # una API key mala deja todo pendiente y sin esto el panel esperaría para siempre).
+        "last_send": JobRun.objects.filter(job=JobRun.Job.BUTTON_SEND, race=race)
+        .order_by("-id")
+        .first(),
     }
 
 

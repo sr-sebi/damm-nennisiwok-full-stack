@@ -23,6 +23,7 @@ from races.api.serializers import (
     RegistrationSerializer,
     RegistrationSummarySerializer,
     SettingsSerializer,
+    issue_order,
 )
 from races.application import register, registrations, send_confirmations
 from races.application.import_registrations import submit_import
@@ -39,6 +40,12 @@ class Pages(PageNumberPagination):
 
 
 STATUSES = {value for value, _ in Registration.Status.choices}
+
+
+def query_param(request, name: str) -> str:
+    """Un parámetro de la URL como texto, sin NUL: PostgreSQL no admite el byte 0 en una consulta
+    y daría un 500 en vez de «no hay resultados»."""
+    return request.query_params.get(name, "").replace("\x00", "")
 
 
 def with_counts(queryset):
@@ -109,13 +116,13 @@ class RaceViewSet(
         race = self.get_object()
         if request.method == "POST":
             return self._register(request, race)
-        wanted = request.query_params.get("status") or None
+        wanted = query_param(request, "status") or None
         if wanted is not None and wanted not in STATUSES:
             return Response(
                 {"status": [f"Estado desconocido «{wanted}»: {', '.join(sorted(STATUSES))}."]},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        queryset = registrations.search(race, request.query_params.get("q", ""), wanted)
+        queryset = registrations.search(race, query_param(request, "q"), wanted)
         paginator = Pages()
         page = paginator.paginate_queryset(queryset, request, view=self)
         data = RegistrationSerializer(page, many=True, context={"race_date": race.date}).data
@@ -227,7 +234,7 @@ class ImportBatchViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
     def issues(self, request, pk=None):
         """Todas las incidencias, paginadas. Filtros: kind, code, field, value, new=1."""
         batch = get_object_or_404(ImportBatch, pk=pk)
-        issues = batch.issues.select_related("registration").order_by("line", "id")
+        issues = batch.issues.select_related("registration").order_by(*issue_order())
         for param, lookup in (
             ("kind", "kind"),
             ("code", "code"),
@@ -235,7 +242,7 @@ class ImportBatchViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
             ("value", "group_value"),
         ):
             if param in request.query_params:
-                issues = issues.filter(**{lookup: request.query_params[param]})
+                issues = issues.filter(**{lookup: query_param(request, param)})
         if request.query_params.get("new") in ("1", "true"):
             issues = issues.filter(is_new=True)
         paginator = Pages()
@@ -265,6 +272,21 @@ class RegistrationViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
                 "registration": RegistrationSerializer(self.get_object()).data,
                 "changes": [d.describe() for d in result.changes],
                 "notice": result.notice,
+            }
+        )
+
+    @action(detail=True, methods=["post"], url_path="not-duplicate")
+    def not_duplicate(self, request, pk=None):
+        """Una persona ha revisado el posible duplicado y no es la misma: se quita la marca."""
+        self.get_object()
+        reg = register.clear_possible_duplicate(int(pk))
+        return Response(
+            {
+                "registration": RegistrationSerializer(self.get_object()).data,
+                "message": (
+                    f"La inscripción de {reg.first_name} {reg.last_name} ya no tiene la marca de "
+                    "posible duplicado: recibirá la confirmación con el siguiente envío."
+                ),
             }
         )
 
@@ -338,6 +360,6 @@ class JobRunViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
 
     def get_queryset(self):
         runs = JobRun.objects.all()
-        if job := self.request.query_params.get("job"):
+        if job := query_param(self.request, "job"):
             runs = runs.filter(job=job)
         return runs.order_by("-started_at", "-id")[:RECENT_IMPORTS]

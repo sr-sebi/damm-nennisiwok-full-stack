@@ -6,6 +6,7 @@ from django.utils import timezone
 
 from races.application.import_registrations import process_queue
 from races.application.send_confirmations import load_send_config, send_pending
+from races.models import JobRun
 
 
 @shared_task(ignore_result=True)
@@ -22,7 +23,34 @@ def send_confirmations(race_id: int | None = None) -> None:
     Lo que quede para más tarde (un reintento lejano) se vuelve a encolar para su hora. Con un
     error de configuración, no: hay que arreglarla, y el siguiente envío lo retoma.
     """
-    follow_up(race_id, send_pending(race_id, load_send_config()))
+    started = timezone.now()
+    try:
+        summary = send_pending(race_id, load_send_config())
+    except Exception:
+        if race_id is not None:
+            _record_button_send(race_id, started, None)
+        raise
+    if race_id is not None:
+        _record_button_send(race_id, started, summary)
+    follow_up(race_id, summary)
+
+
+def _record_button_send(race_id: int, started, summary) -> None:
+    """Resultado del envío de una carrera, para que el panel sepa que ha terminado y cómo."""
+    from races.application.scheduled_jobs import describe_send
+
+    if summary is None:
+        result, text = JobRun.Result.ERROR, "Error inesperado. Revisa los registros del worker."
+    else:
+        result, text = describe_send(summary)
+    JobRun.objects.create(
+        job=JobRun.Job.BUTTON_SEND,
+        race_id=race_id,
+        started_at=started,
+        finished_at=timezone.now(),
+        result=result,
+        summary=text,
+    )
 
 
 def follow_up(race_id: int | None, summary) -> None:

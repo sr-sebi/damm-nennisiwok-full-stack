@@ -244,8 +244,9 @@ def search(race: Race, q: str = "", status: str | None = None) -> QuerySet[Regis
     queryset = Registration.objects.filter(race=race)
     if status:
         queryset = queryset.filter(status=status)
-    q = (q or "").strip()
-    if q.isdigit():
+    q = (q or "").replace("\x00", "").strip()
+    # `"²".isdigit()` es True pero `int("²")` falla: el dorsal, solo con cifras 0–9.
+    if q.isascii() and q.isdigit():
         queryset = queryset.filter(bib=int(q))
     elif q:
         for word in q.split():

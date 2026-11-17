@@ -257,6 +257,7 @@ class ImportIssue(models.Model):
         REJECTED = "rechazada", "Rechazada"
         ALREADY_REGISTERED = "ya_inscrita", "Ya inscrita por otro canal"
         POSSIBLE_DUPLICATE = "posible_duplicada", "Posible duplicado"
+        REPEATED = "repetida", "Repetida en el fichero con otros datos"
         MISSING = "ausente", "No aparece en el listado"
 
     batch = models.ForeignKey(ImportBatch, on_delete=models.CASCADE, related_name="issues")
@@ -412,6 +413,7 @@ class JobRun(models.Model):
 
     class Job(models.TextChoices):
         SCHEDULED_SEND = "envio_programado", "Envío programado de confirmaciones"
+        BUTTON_SEND = "envio_boton", "Envío de confirmaciones con el botón"
 
     class Result(models.TextChoices):
         RUNNING = "en_marcha", "En marcha"
@@ -419,8 +421,14 @@ class JobRun(models.Model):
         IDLE = "idle", "No tocaba"
         LOCKED = "locked", "Otro en marcha"
         ERROR = "error", "Error"
+        # El worker murió a mitad: no cuenta como el envío del día, el siguiente latido lo repite.
+        ABANDONED = "caido", "Caído"
 
     job = models.CharField(max_length=30, choices=Job.choices)
+    # Solo en los envíos de una carrera (el botón): el programado es de todas.
+    race = models.ForeignKey(
+        Race, null=True, blank=True, on_delete=models.CASCADE, related_name="job_runs"
+    )
     started_at = models.DateTimeField()
     finished_at = models.DateTimeField(null=True, blank=True)
     result = models.CharField(max_length=20, choices=Result.choices)
