@@ -96,6 +96,12 @@ class RaceRegistrar:
             .first()
         )
 
+    def has_also_channel(self, registration: Registration, channel: Channel) -> bool:
+        return registration.also_channels.filter(pk=channel.pk).exists()
+
+    def remember(self, registration: Registration) -> None:
+        """Se llama tras guardar un alta: un índice en memoria la apunta aquí."""
+
     # --- casos de uso -----------------------------------------------------------------------
 
     def register(
@@ -116,7 +122,7 @@ class RaceRegistrar:
         if existing.channel_id == channel.id:
             return self._update(existing, values)
         found = differences(as_canonical(existing), values)
-        if note_channel and not existing.also_channels.filter(pk=channel.pk).exists():
+        if note_channel and not self.has_also_channel(existing, channel):
             existing.also_channels.add(channel)
         return RegisterResult(Outcome.ALREADY_REGISTERED, existing, differences=found)
 
@@ -195,6 +201,7 @@ class RaceRegistrar:
             self._next_position += 1
             outcome = Outcome.WAITLISTED
         registration.save()
+        self.remember(registration)
         return RegisterResult(outcome, registration, possible_duplicate_of=duplicate_of)
 
     def _update(self, registration: Registration, values: CanonicalRegistration) -> RegisterResult:
@@ -217,11 +224,13 @@ class RaceRegistrar:
 
 
 @contextmanager
-def race_registrar(race_id: int) -> Iterator[RaceRegistrar]:
+def race_registrar(
+    race_id: int, registrar_class: type[RaceRegistrar] = RaceRegistrar
+) -> Iterator[RaceRegistrar]:
     """Transacción con la carrera bloqueada hasta el final; un error lo deshace todo."""
     with transaction.atomic():
         race = Race.objects.select_for_update().get(pk=race_id)
-        registrar = RaceRegistrar(race)
+        registrar = registrar_class(race)
         yield registrar
         registrar.flush()
 
