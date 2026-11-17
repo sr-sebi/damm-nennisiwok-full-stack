@@ -102,6 +102,9 @@ CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "amqp://guest:guest@loca
 CELERY_TASK_ALWAYS_EAGER = env_bool("CELERY_TASK_ALWAYS_EAGER", True)
 CELERY_TASK_EAGER_PROPAGATES = True
 
+# Proveedor de email activo (races.infrastructure.email.PROVIDERS). Sus credenciales y su URL van en
+# el entorno, no en la base de datos: dependen del entorno y no deben verse en una pantalla.
+EMAIL_PROVIDER = os.environ.get("EMAIL_PROVIDER", "notificador")
 NOTIFIER_BASE_URL = os.environ.get("NOTIFIER_BASE_URL", "http://localhost:9000")
 NOTIFIER_API_KEY = os.environ.get("NOTIFIER_API_KEY", "dev-notifier-key")
 

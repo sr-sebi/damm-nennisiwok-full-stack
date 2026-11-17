@@ -1,6 +1,14 @@
 from django.contrib import admin
 
-from races.models import Channel, ChannelColumn, ImportBatch, Race, Registration, ValueAlias
+from races.models import (
+    Channel,
+    ChannelColumn,
+    ImportBatch,
+    Notification,
+    Race,
+    Registration,
+    ValueAlias,
+)
 
 
 @admin.register(Race)
@@ -44,3 +52,11 @@ class RegistrationAdmin(admin.ModelAdmin):
 class ImportBatchAdmin(admin.ModelAdmin):
     list_display = ("id", "race", "channel", "status", "processed_rows", "total_rows", "created_at")
     list_filter = ("status", "channel")
+
+
+@admin.register(Notification)
+class NotificationAdmin(admin.ModelAdmin):
+    list_display = ("idempotency_key", "status", "attempts", "next_attempt_at", "sent_at")
+    list_filter = ("status", "provider")
+    search_fields = ("idempotency_key",)
+    raw_id_fields = ("registration",)

@@ -285,3 +285,50 @@ class ImportIssue(models.Model):
 
     def __str__(self):
         return f"Línea {self.line}: {self.message}"
+
+
+class Notification(models.Model):
+    """Bandeja de salida: una fila por mensaje lógico (hoy, el email de confirmación).
+
+    La fuente de verdad de «ya enviado» es esta tabla, no la clave de idempotencia del proveedor
+    (el real la recuerda 24 h). `idempotency_key` es la misma en todos los intentos.
+
+    `next_attempt_at` dice cuándo se puede volver a intentar. En `enviando` hace de plazo de la
+    reserva: quien la reserva pone `ahora + plazo`; si el worker muere a mitad, al vencer el plazo
+    otro la retoma con la misma clave.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pendiente", "Pendiente"
+        SENDING = "enviando", "Enviando"
+        SENT = "enviada", "Enviada"
+        FAILED = "fallida", "Fallida"
+
+    registration = models.ForeignKey(
+        Registration, on_delete=models.CASCADE, related_name="notifications"
+    )
+    idempotency_key = models.CharField(max_length=255, unique=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    # Intentos gastados. Un «espera» del proveedor (429) no cuenta.
+    attempts = models.PositiveIntegerField(default=0)
+    next_attempt_at = models.DateTimeField()
+    # Motivo del último fallo, para el usuario. Nunca va a los logs.
+    last_error = models.TextField(blank=True)
+    provider = models.CharField(max_length=50, blank=True)
+    provider_id = models.CharField(max_length=255, blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["id"]
+        indexes = [
+            models.Index(fields=["status", "next_attempt_at"], name="notification_due"),
+        ]
+
+    def __str__(self):
+        return f"{self.idempotency_key} ({self.get_status_display()})"
+
+    @staticmethod
+    def confirmation_key(registration_id: int, bib: int) -> str:
+        return f"confirmacion-{registration_id}-{bib}"

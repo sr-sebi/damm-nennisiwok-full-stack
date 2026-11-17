@@ -4,9 +4,10 @@ from django.conf import settings
 from django.db.models import Count, Q
 from rest_framework import serializers
 
+from races.application.send_confirmations import is_eligible
 from races.domain.issues import Issue, IssueCode, group_message
 from races.domain.rules import category_for
-from races.models import Channel, ImportBatch, ImportIssue, Race, Registration
+from races.models import Channel, ImportBatch, ImportIssue, Notification, Race, Registration
 
 ALLOWED_EXTENSIONS = {".xlsx": Channel.Format.XLSX, ".csv": Channel.Format.CSV}
 EXAMPLES_PER_GROUP = 5
@@ -135,6 +136,7 @@ class RegistrationSerializer(serializers.ModelSerializer):
     also_channels = serializers.SerializerMethodField()
     category = serializers.SerializerMethodField()
     possible_duplicate_of = serializers.SerializerMethodField()
+    email_status = serializers.SerializerMethodField()
 
     class Meta:
         model = Registration
@@ -155,6 +157,7 @@ class RegistrationSerializer(serializers.ModelSerializer):
             "also_channels",
             "possible_duplicate_of",
             "missing_since",
+            "email_status",
             "created_at",
             "updated_at",
         ]
@@ -178,6 +181,65 @@ class RegistrationSerializer(serializers.ModelSerializer):
             "first_name": other.first_name,
             "last_name": other.last_name,
         }
+
+    def get_email_status(self, registration):
+        """Email de confirmación: su fila de la bandeja de salida, o «pendiente» si aún no la tiene
+        y le toca. `null` si no le toca (en espera, baja, posible duplicado, carrera pasada)."""
+        # `.all()` usa lo precargado con prefetch_related: sin consulta por fila.
+        notifications = list(registration.notifications.all())
+        if notifications:
+            return NotificationStatusSerializer(max(notifications, key=lambda n: n.pk)).data
+        race_date = self.context.get("race_date") or registration.race.date
+        if not is_eligible(registration, race_date):
+            return None
+        return {
+            "id": None,
+            "status": Notification.Status.PENDING,
+            "attempts": 0,
+            "last_error": "",
+            "sent_at": None,
+            "updated_at": None,
+        }
+
+
+class NotificationStatusSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notification
+        fields = ["id", "status", "attempts", "last_error", "sent_at", "updated_at"]
+        read_only_fields = fields
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    """Un email de la bandeja de salida, con a quién va (para la lista de fallidas)."""
+
+    registration = RegistrationSummarySerializer(read_only=True)
+
+    class Meta:
+        model = Notification
+        fields = [
+            "id",
+            "registration",
+            "status",
+            "attempts",
+            "last_error",
+            "provider",
+            "sent_at",
+            "next_attempt_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class ConfirmationStatusSerializer(serializers.Serializer):
+    race = serializers.IntegerField()
+    race_past = serializers.BooleanField()
+    provider = serializers.CharField()
+    pending = serializers.IntegerField()
+    sending = serializers.IntegerField()
+    sent = serializers.IntegerField()
+    failed = serializers.IntegerField()
+    held_duplicates = serializers.IntegerField()
+    failures = NotificationSerializer(many=True)
 
 
 class ImportUploadSerializer(serializers.Serializer):

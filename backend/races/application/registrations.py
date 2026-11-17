@@ -259,7 +259,7 @@ def search(race: Race, q: str = "", status: str | None = None) -> QuerySet[Regis
     )
     return (
         queryset.select_related("channel", "possible_duplicate_of")
-        .prefetch_related("also_channels")
+        .prefetch_related("also_channels", "notifications")
         .order_by(without_bib_last, "bib", "waitlist_position", "id")
     )
 

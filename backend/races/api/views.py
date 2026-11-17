@@ -1,5 +1,6 @@
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
@@ -7,10 +8,12 @@ from rest_framework.response import Response
 
 from races.api.serializers import (
     ChannelSerializer,
+    ConfirmationStatusSerializer,
     ImportBatchSerializer,
     ImportReportSerializer,
     ImportUploadSerializer,
     IssueSerializer,
+    NotificationSerializer,
     RaceCapacitySerializer,
     RaceSerializer,
     RegistrationCreateSerializer,
@@ -18,10 +21,11 @@ from races.api.serializers import (
     RegistrationSerializer,
     RegistrationSummarySerializer,
 )
-from races.application import register, registrations
+from races.application import register, registrations, send_confirmations
 from races.application.import_registrations import submit_import
 from races.application.registrations import AlreadyRegistered, RegistrationRejected
-from races.models import Channel, ImportBatch, Race, Registration
+from races.application.send_confirmations import CannotRetry
+from races.models import Channel, ImportBatch, Notification, Race, Registration
 
 RECENT_IMPORTS = 20
 
@@ -183,6 +187,33 @@ class RaceViewSet(
         batch = submit_import(race, upload.validated_data["channel"], upload.validated_data["file"])
         return Response(ImportBatchSerializer(batch).data, status=status.HTTP_202_ACCEPTED)
 
+    @action(detail=True, methods=["get", "post"], url_path="confirmations")
+    def confirmations(self, request, pk=None):
+        """GET: cifras del envío de confirmaciones y las fallidas con su motivo.
+        POST: encola el envío de las pendientes de esta carrera (202)."""
+        race = self.get_object()
+        if request.method == "GET":
+            data = send_confirmations.race_status(race)
+            return Response(ConfirmationStatusSerializer(data).data)
+        if race.date < timezone.localdate():
+            return Response(
+                {"detail": "La carrera ya se ha celebrado: no se envían confirmaciones."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        pending = send_confirmations.request_send(race)
+        if not pending:
+            return Response(
+                {"queued": False, "pending": 0, "message": "No hay confirmaciones pendientes."}
+            )
+        return Response(
+            {
+                "queued": True,
+                "pending": pending,
+                "message": f"Enviando {pending} confirmaciones en segundo plano.",
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
 
 class ImportBatchViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
     queryset = ImportBatch.objects.select_related("channel")
@@ -211,7 +242,7 @@ class ImportBatchViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
 class RegistrationViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
     queryset = Registration.objects.select_related(
         "race", "channel", "possible_duplicate_of"
-    ).prefetch_related("also_channels")
+    ).prefetch_related("also_channels", "notifications")
     serializer_class = RegistrationSerializer
 
     def partial_update(self, request, pk=None):
@@ -252,6 +283,27 @@ class RegistrationViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
                 "promoted": RegistrationSummarySerializer(result.promoted, many=True).data,
                 "message": message.strip(),
             }
+        )
+
+
+class NotificationViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
+    queryset = Notification.objects.select_related("registration__channel")
+    serializer_class = NotificationSerializer
+
+    @action(detail=True, methods=["post"])
+    def retry(self, request, pk=None):
+        """Una fallida vuelve a pendiente (intentos a cero, misma clave) y se encola el envío."""
+        self.get_object()  # 404 si no existe
+        try:
+            send_confirmations.retry_failed(int(pk))
+        except CannotRetry as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response(
+            {
+                "notification": NotificationSerializer(self.get_object()).data,
+                "message": "Se volverá a intentar enseguida.",
+            },
+            status=status.HTTP_202_ACCEPTED,
         )
 
 
