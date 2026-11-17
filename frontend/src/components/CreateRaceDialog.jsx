@@ -9,14 +9,16 @@ import {
   TextField,
 } from '@mui/material';
 import { useState } from 'react';
+import { fieldErrors } from '../api/client';
 import { createRace } from '../api/races';
 
-const EMPTY_FORM = { name: '', date: '', location: '' };
+const EMPTY_FORM = { name: '', date: '', location: '', capacity: '' };
 
 export default function CreateRaceDialog({ open, onClose, onCreated }) {
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [errors, setErrors] = useState({});
 
   const handleChange = (event) => {
     setForm((current) => ({ ...current, [event.target.name]: event.target.value }));
@@ -25,6 +27,7 @@ export default function CreateRaceDialog({ open, onClose, onCreated }) {
   const handleClose = () => {
     setForm(EMPTY_FORM);
     setError(null);
+    setErrors({});
     onClose();
   };
 
@@ -32,12 +35,17 @@ export default function CreateRaceDialog({ open, onClose, onCreated }) {
     event.preventDefault();
     setSaving(true);
     setError(null);
+    setErrors({});
     try {
-      const race = await createRace(form);
+      // Aforo vacío = sin límite.
+      const capacity = form.capacity === '' ? null : Number(form.capacity);
+      const race = await createRace({ ...form, capacity });
       setForm(EMPTY_FORM);
       onCreated(race);
     } catch (err) {
-      setError(err.message);
+      const byField = fieldErrors(err);
+      setErrors(byField);
+      setError(Object.keys(byField).length ? 'Revisa los datos marcados.' : err.message);
     } finally {
       setSaving(false);
     }
@@ -53,6 +61,8 @@ export default function CreateRaceDialog({ open, onClose, onCreated }) {
             <TextField
               label="Nombre"
               name="name"
+              error={Boolean(errors.name)}
+              helperText={errors.name}
               value={form.name}
               onChange={handleChange}
               required
@@ -61,6 +71,8 @@ export default function CreateRaceDialog({ open, onClose, onCreated }) {
             <TextField
               label="Fecha"
               name="date"
+              error={Boolean(errors.date)}
+              helperText={errors.date}
               type="date"
               value={form.date}
               onChange={handleChange}
@@ -70,8 +82,23 @@ export default function CreateRaceDialog({ open, onClose, onCreated }) {
             <TextField
               label="Lugar"
               name="location"
+              error={Boolean(errors.location)}
+              helperText={errors.location}
               value={form.location}
               onChange={handleChange}
+            />
+            <TextField
+              label="Aforo"
+              name="capacity"
+              type="number"
+              value={form.capacity}
+              onChange={handleChange}
+              error={Boolean(errors.capacity)}
+              helperText={
+                errors.capacity ||
+                'Número máximo de inscripciones confirmadas. Vacío = sin límite; al llenarse, las nuevas van a lista de espera.'
+              }
+              slotProps={{ htmlInput: { min: 1, step: 1 } }}
             />
           </Stack>
         </DialogContent>

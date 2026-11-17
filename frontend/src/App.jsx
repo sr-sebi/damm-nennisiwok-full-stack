@@ -1,9 +1,12 @@
 import DirectionsRunIcon from '@mui/icons-material/DirectionsRun';
-import { AppBar, Box, Container, Toolbar, Typography } from '@mui/material';
+import SettingsIcon from '@mui/icons-material/Settings';
+import { AppBar, Box, Button, Container, Toolbar, Typography } from '@mui/material';
 import { Link as RouterLink, Route, Routes } from 'react-router-dom';
+import NotificationsProvider from './components/NotificationsProvider';
 import NotFoundPage from './pages/NotFoundPage';
 import RaceDetailPage from './pages/RaceDetailPage';
 import RacesPage from './pages/RacesPage';
+import SettingsPage from './pages/SettingsPage';
 
 export default function App() {
   return (
@@ -19,14 +22,21 @@ export default function App() {
           >
             Dorsal
           </Typography>
+          <Box sx={{ flex: 1 }} />
+          <Button color="inherit" component={RouterLink} to="/configuracion" startIcon={<SettingsIcon />}>
+            Configuración
+          </Button>
         </Toolbar>
       </AppBar>
       <Container maxWidth="lg" sx={{ py: 4 }}>
-        <Routes>
-          <Route path="/" element={<RacesPage />} />
-          <Route path="/races/:raceId" element={<RaceDetailPage />} />
-          <Route path="*" element={<NotFoundPage />} />
-        </Routes>
+        <NotificationsProvider>
+          <Routes>
+            <Route path="/" element={<RacesPage />} />
+            <Route path="/races/:raceId" element={<RaceDetailPage />} />
+            <Route path="/configuracion" element={<SettingsPage />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+        </NotificationsProvider>
       </Container>
     </Box>
   );

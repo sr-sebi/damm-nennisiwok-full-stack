@@ -72,6 +72,11 @@ services:
     <<: *backend
     command: ["celery", "-A", "config", "worker", "--loglevel=info", "--concurrency=4"]
 
+  # Un solo beat: lanza el latido cada minuto. El horario real se lee de la base de datos.
+  beat:
+    <<: *backend
+    command: ["celery", "-A", "config", "beat", "--loglevel=info", "--schedule=/tmp/celerybeat-schedule"]
+
   frontend:
     build: ./frontend
     environment:

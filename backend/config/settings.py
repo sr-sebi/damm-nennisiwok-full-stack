@@ -73,7 +73,10 @@ else:
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
             "NAME": BASE_DIR / "db.sqlite3",
-            "OPTIONS": {"timeout": 20},
+            # IMMEDIATE: cada transacción coge el cerrojo de escritura al empezar. SQLite ignora
+            # select_for_update y, con transacciones diferidas, dos altas a la vez acaban en
+            # «database is locked» en vez de esperar su turno.
+            "OPTIONS": {"timeout": 20, "transaction_mode": "IMMEDIATE"},
         }
     }
 
@@ -98,7 +101,21 @@ CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "amqp://guest:guest@loca
 # Sin Docker no hace falta RabbitMQ: las tareas se ejecutan dentro del propio proceso web.
 CELERY_TASK_ALWAYS_EAGER = env_bool("CELERY_TASK_ALWAYS_EAGER", True)
 CELERY_TASK_EAGER_PROPAGATES = True
+CELERY_TIMEZONE = TIME_ZONE
+# Beat solo late: cada minuto lanza el latido, que lee la configuración de la base de datos y decide
+# si toca algo. Cambiar la hora del envío en la app vale en el siguiente latido, sin reiniciar beat.
+# Caduca a los 55 s: si el worker estuvo parado, no se acumulan latidos atrasados.
+CELERY_BEAT_SCHEDULE = {
+    "latido": {
+        "task": "races.tasks.heartbeat",
+        "schedule": 60.0,
+        "options": {"expires": 55},
+    },
+}
 
+# Proveedor de email activo (races.infrastructure.email.PROVIDERS). Sus credenciales y su URL van en
+# el entorno, no en la base de datos: dependen del entorno y no deben verse en una pantalla.
+EMAIL_PROVIDER = os.environ.get("EMAIL_PROVIDER", "notificador")
 NOTIFIER_BASE_URL = os.environ.get("NOTIFIER_BASE_URL", "http://localhost:9000")
 NOTIFIER_API_KEY = os.environ.get("NOTIFIER_API_KEY", "dev-notifier-key")
 
@@ -112,6 +129,10 @@ LOGGING = {
         "console": {"class": "logging.StreamHandler", "formatter": "simple"},
     },
     "loggers": {
-        "races": {"handlers": ["console"], "level": "INFO"},
+        "races": {"handlers": ["console"], "level": "INFO", "propagate": False},
     },
 }
+
+# Importaciones: tope del fichero subido. Los minutos para darla por caída están en la
+# configuración de la base de datos (`races.models.Settings`), editable en la app.
+IMPORT_MAX_UPLOAD_MB = 20
